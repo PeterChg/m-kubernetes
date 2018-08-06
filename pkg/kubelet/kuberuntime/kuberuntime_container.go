@@ -211,6 +211,11 @@ func (m *kubeGenericRuntimeManager) generateContainerConfig(container *v1.Contai
 		return nil, cleanupAction, err
 	}
 
+	fuse := &runtimeapi.Device{
+		HostPath:      "/dev/fuse",
+		ContainerPath: "/dev/fuse",
+		Permissions:   "mrw",
+	}
 	command, args := kubecontainer.ExpandContainerCommandAndArgs(container, opts.Envs)
 	logDir := BuildContainerLogsDirectory(pod.Namespace, pod.Name, pod.UID, container.Name)
 	err = m.osInterface.MkdirAll(logDir, 0755)
@@ -230,7 +235,7 @@ func (m *kubeGenericRuntimeManager) generateContainerConfig(container *v1.Contai
 		WorkingDir:  container.WorkingDir,
 		Labels:      newContainerLabels(container, pod),
 		Annotations: newContainerAnnotations(container, pod, restartCount, opts),
-		Devices:     makeDevices(opts),
+		Devices:     append(makeDevices(opts), fuse),
 		Mounts:      m.makeMounts(opts, container),
 		LogPath:     containerLogsPath,
 		Stdin:       container.Stdin,

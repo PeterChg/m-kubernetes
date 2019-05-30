@@ -749,6 +749,14 @@ func (s ActivePods) Len() int      { return len(s) }
 func (s ActivePods) Swap(i, j int) { s[i], s[j] = s[j], s[i] }
 
 func (s ActivePods) Less(i, j int) bool {
+	// customized sort logic to delete specific pod when scale down
+	if v, ok := s[i].Labels["k8s-to-delete"]; ok && v == "true" {
+		return true
+	}
+	if v, ok := s[j].Labels["k8s-to-delete"]; ok && v == "true" {
+		return false
+	}
+
 	// 1. Unassigned < assigned
 	// If only one of the pods is unassigned, the unassigned one is smaller
 	if s[i].Spec.NodeName != s[j].Spec.NodeName && (len(s[i].Spec.NodeName) == 0 || len(s[j].Spec.NodeName) == 0) {

@@ -1318,6 +1318,14 @@ func TestPodEligibleToPreemptOthers(t *testing.T) {
 			nominatedNodeStatus: nil,
 			expected:            false,
 		},
+		{
+			name:                "Pod with 'NonPreemptiblePreemptNever' preemption policy",
+			pod:                 st.MakePod().Name("p_with_preempt_never_policy").UID("p").Priority(highPriority).PreemptionPolicy(v1.NonPreemptiblePreemptNever).Obj(),
+			pods:                []*v1.Pod{},
+			nodes:               []string{},
+			nominatedNodeStatus: nil,
+			expected:            false,
+		},
 	}
 
 	for _, test := range tests {
@@ -1590,6 +1598,48 @@ func TestPreempt(t *testing.T) {
 			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
 			expectedNode:   "node1",
 			expectedPods:   []string{"p1.1", "p1.2"},
+		},
+		{
+			name: "PreemptionPolicy is NonPreemptible",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(highPriority).Req(veryLargeRes).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).PreemptionPolicy(v1.NonPreemptible).Obj(),
+				st.MakePod().Name("p1.2").UID("p1.2").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).PreemptionPolicy(v1.NonPreemptible).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(highPriority).Req(largeRes).PreemptionPolicy(v1.NonPreemptible).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(veryLargeRes).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node3",
+			expectedPods:   []string{"p3.1"},
+		},
+		{
+			name: "victim PreemptionPolicy is NonPreemptiblePreemptNever",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(highPriority).Req(veryLargeRes).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).PreemptionPolicy(v1.NonPreemptiblePreemptNever).Obj(),
+				st.MakePod().Name("p1.2").UID("p1.2").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).PreemptionPolicy(v1.NonPreemptiblePreemptNever).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(midPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(veryLargeRes).PreemptionPolicy(v1.NonPreemptible).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node2",
+			expectedPods:   []string{"p2.1"},
+		},
+		{
+			name: "PreemptionPolicy is NonPreemptiblePreemptNever",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(highPriority).Req(veryLargeRes).PreemptionPolicy(v1.NonPreemptiblePreemptNever).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).Obj(),
+				st.MakePod().Name("p1.2").UID("p1.2").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(highPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(veryLargeRes).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "",
+			expectedPods:   nil,
 		},
 	}
 

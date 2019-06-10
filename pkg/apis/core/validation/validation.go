@@ -2924,7 +2924,7 @@ func validateRestartPolicy(restartPolicy *core.RestartPolicy, fldPath *field.Pat
 func ValidatePreemptionPolicy(preemptionPolicy *core.PreemptionPolicy, fldPath *field.Path) field.ErrorList {
 	allErrors := field.ErrorList{}
 	switch *preemptionPolicy {
-	case core.PreemptLowerPriority, core.PreemptNever:
+	case core.PreemptLowerPriority, core.PreemptNever, core.NonPreemptible, core.NonPreemptiblePreemptNever:
 	case "":
 		allErrors = append(allErrors, field.Required(fldPath, ""))
 	default:

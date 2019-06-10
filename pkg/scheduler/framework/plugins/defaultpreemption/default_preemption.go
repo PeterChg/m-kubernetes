@@ -242,7 +242,8 @@ func (pl *DefaultPreemption) FindCandidates(ctx context.Context, state *framewor
 // We look at the node that is nominated for this pod and as long as there are
 // terminating pods on the node, we don't consider this for preempting more pods.
 func PodEligibleToPreemptOthers(pod *v1.Pod, nodeInfos framework.NodeInfoLister, nominatedNodeStatus *framework.Status) bool {
-	if pod.Spec.PreemptionPolicy != nil && *pod.Spec.PreemptionPolicy == v1.PreemptNever {
+	if pod.Spec.PreemptionPolicy != nil && (*pod.Spec.PreemptionPolicy == v1.PreemptNever ||
+		*pod.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
 		klog.V(5).InfoS("Pod is not eligible for preemption because it has a preemptionPolicy of Never", "pod", klog.KObj(pod))
 		return false
 	}
@@ -626,6 +627,13 @@ func selectVictimsOnNode(
 	// check if the given pod can be scheduled.
 	podPriority := corev1helpers.PodPriority(pod)
 	for _, pi := range nodeInfo.Pods {
+		if pi.Pod.Spec.PreemptionPolicy != nil && (*pi.Pod.Spec.PreemptionPolicy == v1.NonPreemptible ||
+			*pi.Pod.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
+			klog.V(5).Infof("Pod %v/%v is not eligible to be preempted because it has a preemptionPolicy of %v",
+				pi.Pod.Namespace, pi.Pod.Name, *pi.Pod.Spec.PreemptionPolicy)
+			continue
+		}
+
 		if corev1helpers.PodPriority(pi.Pod) < podPriority {
 			potentialVictims = append(potentialVictims, pi)
 			if err := removePod(pi); err != nil {

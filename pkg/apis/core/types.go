@@ -2053,6 +2053,10 @@ const (
 	PreemptLowerPriority PreemptionPolicy = "PreemptLowerPriority"
 	// PreemptNever means that pod never preempts other pods with lower priority.
 	PreemptNever PreemptionPolicy = "Never"
+	// NonPreemptible means that pod can not be preempted by other pods with higher priority.
+	NonPreemptible PreemptionPolicy = "NonPreemptible"
+	// NonPreemptiblePreemptNever means that pod can not be preempted by other pods with higher priority and never preempts other pods with lower priority.
+	NonPreemptiblePreemptNever PreemptionPolicy = "NonPreemptiblePreemptNever"
 )
 
 // TerminationMessagePolicy describes how termination messages are retrieved from a container.
@@ -2819,7 +2823,7 @@ type PodSpec struct {
 	// +optional
 	Priority *int32
 	// PreemptionPolicy is the Policy for preempting pods with lower priority.
-	// One of Never, PreemptLowerPriority.
+	// One of Never, PreemptLowerPriority, NonPreemptible, NonPreemptiblePreemptNever.
 	// Defaults to PreemptLowerPriority if unset.
 	// This field is beta-level, gated by the NonPreemptingPriority feature-gate.
 	// +optional

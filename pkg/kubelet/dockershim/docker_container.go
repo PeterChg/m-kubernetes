@@ -133,6 +133,14 @@ func (ds *dockerService) CreateContainer(_ context.Context, r *runtimeapi.Create
 	if iSpec := config.GetImage(); iSpec != nil {
 		image = iSpec.Image
 	}
+
+	init := false
+	for i, _ := range config.Envs {
+		if config.Envs[i].Key == containerInitFlag {
+			init = true
+		}
+	}
+
 	containerName := makeContainerName(sandboxConfig, config)
 	createConfig := dockertypes.ContainerCreateConfig{
 		Name: containerName,
@@ -159,6 +167,7 @@ func (ds *dockerService) CreateContainer(_ context.Context, r *runtimeapi.Create
 			RestartPolicy: dockercontainer.RestartPolicy{
 				Name: "no",
 			},
+			Init: &init,
 		},
 	}
 

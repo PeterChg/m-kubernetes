@@ -79,6 +79,7 @@ const (
 	// Dockershim should provide detection support for a remapping environment .
 	// This should be included in the feature proposal.  Defaulting may still occur according
 	// to kubelet behavior and system settings in addition to any API flags that may be introduced.
+	containerInitFlag = "CONTAINER_S_INIT"
 )
 
 // CRIService includes all methods necessary for a CRI server.

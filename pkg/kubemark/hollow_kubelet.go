@@ -59,6 +59,7 @@ import (
 	"k8s.io/kubernetes/pkg/volume/util/hostutil"
 	"k8s.io/kubernetes/pkg/volume/util/subpath"
 	"k8s.io/kubernetes/test/utils"
+	"k8s.io/utils/exec"
 )
 
 type HollowKubelet struct {
@@ -101,19 +102,20 @@ func NewHollowKubelet(
 	dockerClientConfig *dockershim.ClientConfig,
 	containerManager cm.ContainerManager) *HollowKubelet {
 	d := &kubelet.Dependencies{
-		KubeClient:         client,
-		HeartbeatClient:    heartbeatClient,
-		DockerClientConfig: dockerClientConfig,
-		CAdvisorInterface:  cadvisorInterface,
-		Cloud:              nil,
-		OSInterface:        &containertest.FakeOS{},
-		ContainerManager:   containerManager,
-		VolumePlugins:      volumePlugins(),
-		TLSOptions:         nil,
-		OOMAdjuster:        oom.NewFakeOOMAdjuster(),
-		Mounter:            mount.New("" /* default mount path */),
-		Subpather:          &subpath.FakeSubpath{},
-		HostUtil:           hostutil.NewFakeHostUtil(nil),
+		KubeClient:          client,
+		HeartbeatClient:     heartbeatClient,
+		DockerClientConfig:  dockerClientConfig,
+		CAdvisorInterface:   cadvisorInterface,
+		Cloud:               nil,
+		OSInterface:         &containertest.FakeOS{},
+		ContainerManager:    containerManager,
+		VolumePlugins:       volumePlugins(),
+		TLSOptions:          nil,
+		OOMAdjuster:         oom.NewFakeOOMAdjuster(),
+		Mounter:             mount.New("" /* default mount path */),
+		Subpather:           &subpath.FakeSubpath{},
+		HostUtil:            hostutil.NewFakeHostUtil(nil),
+		DynamicPluginProber: kubeletapp.GetDynamicPluginProber(flags.VolumePluginDir, exec.New()),
 	}
 
 	return &HollowKubelet{

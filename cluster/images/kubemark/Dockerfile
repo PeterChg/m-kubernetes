@@ -17,3 +17,5 @@
 FROM debian@sha256:e25703ee6ab5b2fac31510323d959cdae31eebdf48e88891c549e55b25ad7e94
 
 COPY kubemark /kubemark
+RUN apt-get update && apt-get install -y jq && rm -rf /var/lib/apt/lists/*
+COPY lvm-xiaomi.sh /usr/libexec/kubernetes/kubelet-plugins/volume/exec/xiaomi~lvm/lvm

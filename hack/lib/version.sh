@@ -107,7 +107,10 @@ kube::version::get_version_vars() {
       fi
 
       # If KUBE_GIT_VERSION is not a valid Semantic Version, then refuse to build.
-      if ! [[ "${KUBE_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+      # 修改之前的正则表达式的pattern为： ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$
+      # 该pattern 只允许三段，如果tag不满足该正则会导致无法编译  
+      # 修改该pattern以满足内部release命名规范， 内部release流程参见： https://wiki.n.miui.com/pages/viewpage.action?pageId=139984189
+      if ! [[ "${KUBE_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?* ]]; then
           echo "KUBE_GIT_VERSION should be a valid Semantic Version. Current value: ${KUBE_GIT_VERSION}"
           echo "Please see more details here: https://semver.org"
           exit 1

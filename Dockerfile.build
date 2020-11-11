@@ -1,0 +1,20 @@
+# This is CI image for kubernetes, please named as: 
+#   cr.d.xiaomi.net/kubernetes/k8s-ci-image-email:v1.1
+# you can build image by command: `docker build . -t cr.d.xiaomi.net/kubernetes/k8s-ci-image-email:v1.1 -f Dockerfile.build`
+
+FROM centos:7
+RUN rpm --import /etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7 && \
+    yum update -y && \
+    yum --enablerepo=extras install -y epel-release git make gcc gcc-c++ rpm-build cmake && \
+    yum install -y wget && \
+    curl https://dl.google.com/go/go1.12.5.linux-amd64.tar.gz | tar -C /usr/local -xz && \
+    yum install -y tar && \
+    yum install -y which && \
+    yum install -y rsync && \
+    rm -rf /var/cache/yum
+
+RUN curl https://bootstrap.pypa.io/get-pip.py | python - && \
+    pip install galaxy-fds-sdk
+
+ENV PATH="/usr/local/go/bin:/root/go/bin:${PATH}"
+WORKDIR /project

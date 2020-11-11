@@ -102,6 +102,9 @@ type KubeletFlags struct {
 	// registerNode enables automatic registration with the apiserver.
 	RegisterNode bool
 
+	// max pod number avoid to remove at once, circuit breaker will be trigger when pod number exceeded this value
+	MaxPodsToRemoveAtOnce int32
+
 	// registerWithTaints are an array of taints to add to a node object when
 	// the kubelet registers itself. This only takes effect when registerNode
 	// is true and upon the initial registration of the node.
@@ -192,6 +195,7 @@ func NewKubeletFlags() *KubeletFlags {
 		NodeLabels:              make(map[string]string),
 		RegisterNode:            true,
 		SeccompProfileRoot:      filepath.Join(defaultRootDir, "seccomp"),
+		MaxPodsToRemoveAtOnce:   3,
 	}
 }
 
@@ -339,6 +343,7 @@ func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 
 	fs.BoolVar(&f.RegisterNode, "register-node", f.RegisterNode, "Register the node with the apiserver. If --kubeconfig is not provided, this flag is irrelevant, as the Kubelet won't have an apiserver to register with.")
 	fs.Var(utiltaints.NewTaintsVar(&f.RegisterWithTaints), "register-with-taints", "Register the node with the given list of taints (comma separated \"<key>=<value>:<effect>\"). No-op if register-node is false.")
+	fs.Int32Var(&f.MaxPodsToRemoveAtOnce, "pod-number-avoid-to-remove-at-once", f.MaxPodsToRemoveAtOnce, "Max pod number avoid to remove at once, this is used by circuit-breaker when disrupation occurred")
 
 	// EXPERIMENTAL FLAGS
 	fs.StringVar(&f.RemoteRuntimeEndpoint, "container-runtime-endpoint", f.RemoteRuntimeEndpoint, "[Experimental] The endpoint of remote runtime service. Currently unix socket endpoint is supported on Linux, while npipe and tcp endpoints are supported on windows. Note: When using docker as container runtime this specifies the dockershim socket location which kubelet itself creates.  Examples:'unix:///var/run/dockershim.sock', 'npipe:////./pipe/dockershim'")

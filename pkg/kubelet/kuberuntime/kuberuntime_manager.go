@@ -466,6 +466,13 @@ func (m *kubeGenericRuntimeManager) podSandboxChanged(pod *v1.Pod, podStatus *ku
 
 func containerChanged(container *v1.Container, containerStatus *kubecontainer.ContainerStatus) (uint64, uint64, bool) {
 	expectedHash := kubecontainer.HashContainer(container)
+	if containerStatus.Hash != expectedHash {
+		expectedV14Hash := kubecontainer.HashContainerWith14Version(container)
+		klog.V(3).Infof("----: try v1.14-version hash, container: %v <expectedHash: %d, containerHash: %d>", container.Name, expectedV14Hash, containerStatus.Hash)
+		if containerStatus.Hash == expectedV14Hash {
+			return expectedV14Hash, containerStatus.Hash, false
+		}
+	}
 	return expectedHash, containerStatus.Hash, containerStatus.Hash != expectedHash
 }
 

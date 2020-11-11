@@ -10,7 +10,10 @@ go_library(
     name = "go_default_library",
     srcs = ["hash.go"],
     importpath = "k8s.io/kubernetes/pkg/util/hash",
-    deps = ["//vendor/github.com/davecgh/go-spew/spew:go_default_library"],
+    deps = [
+        "//vendor/git.n.xiaomi.com/go/github/go-spew/spew:go_default_library",
+        "//vendor/github.com/davecgh/go-spew/spew:go_default_library",
+    ],
 )
 
 go_test(

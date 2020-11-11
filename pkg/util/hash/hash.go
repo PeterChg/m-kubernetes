@@ -17,9 +17,9 @@ limitations under the License.
 package hash
 
 import (
-	"hash"
-
+	xiaomispew "git.n.xiaomi.com/go/github/go-spew/spew"
 	"github.com/davecgh/go-spew/spew"
+	"hash"
 )
 
 // DeepHashObject writes specified object to hash using the spew library
@@ -32,6 +32,19 @@ func DeepHashObject(hasher hash.Hash, objectToWrite interface{}) {
 		SortKeys:       true,
 		DisableMethods: true,
 		SpewKeys:       true,
+	}
+	printer.Fprintf(hasher, "%#v", objectToWrite)
+}
+
+// DeepHashObjectWithIgnoreField is same as DeepHashObject but ignore specific field when hashing
+func DeepHashObjectWithIgnoreField(hasher hash.Hash, objectToWrite interface{}, ignoreFields []string) {
+	hasher.Reset()
+	printer := xiaomispew.ConfigState{
+		Indent:         " ",
+		SortKeys:       true,
+		DisableMethods: true,
+		SpewKeys:       true,
+		IgnoreFields:   ignoreFields,
 	}
 	printer.Fprintf(hasher, "%#v", objectToWrite)
 }

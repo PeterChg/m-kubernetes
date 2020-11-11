@@ -108,6 +108,13 @@ func HashContainer(container *v1.Container) uint64 {
 	return uint64(hash.Sum32())
 }
 
+// HashContainerWith14Version same as HashContainer, but returns the hash of the container used in v1.14 version.
+func HashContainerWith14Version(container *v1.Container) uint64 {
+	hash := fnv.New32a()
+	hashutil.DeepHashObjectWithIgnoreField(hash, *container, []string{"StartupProbe", "WindowsOptions"})
+	return uint64(hash.Sum32())
+}
+
 // EnvVarsToMap constructs a map of environment name to value from a slice
 // of env vars.
 func EnvVarsToMap(envs []EnvVar) map[string]string {

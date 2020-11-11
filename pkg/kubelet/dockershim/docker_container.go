@@ -135,7 +135,7 @@ func (ds *dockerService) CreateContainer(_ context.Context, r *runtimeapi.Create
 	}
 
 	init := false
-	for i, _ := range config.Envs {
+	for i := range config.Envs {
 		if config.Envs[i].Key == containerInitFlag {
 			init = true
 		}

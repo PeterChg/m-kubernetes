@@ -117,6 +117,9 @@ type KubeletFlags struct {
 	// registerNode enables automatic registration with the apiserver.
 	RegisterNode bool
 
+	// pod number avoid to remove at once, circuit breaker will be trigger when pod number exceeded this value
+	PodNumberAvoidToRemoveAtOnce int32
+
 	// registerWithTaints are an array of taints to add to a node object when
 	// the kubelet registers itself. This only takes effect when registerNode
 	// is true and upon the initial registration of the node.
@@ -220,6 +223,8 @@ func NewKubeletFlags() *KubeletFlags {
 		// prior to the introduction of this flag, there was a hardcoded cap of 50 images
 		NodeStatusMaxImages:         50,
 		EnableCAdvisorJSONEndpoints: true,
+
+		PodNumberAvoidToRemoveAtOnce: 3,
 	}
 }
 
@@ -381,6 +386,7 @@ func (f *KubeletFlags) AddFlags(mainfs *pflag.FlagSet) {
 
 	fs.BoolVar(&f.RegisterNode, "register-node", f.RegisterNode, "Register the node with the apiserver. If --kubeconfig is not provided, this flag is irrelevant, as the Kubelet won't have an apiserver to register with.")
 	fs.Var(utiltaints.NewTaintsVar(&f.RegisterWithTaints), "register-with-taints", "Register the node with the given list of taints (comma separated \"<key>=<value>:<effect>\"). No-op if register-node is false.")
+	fs.Int32Var(&f.PodNumberAvoidToRemoveAtOnce, "pod-number-avoid-to-remove-at-once", f.PodNumberAvoidToRemoveAtOnce, "Pod number avoid to remove at once, this is used by circuit-breaker when disrupation occured")
 
 	// EXPERIMENTAL FLAGS
 	fs.StringVar(&f.ExperimentalMounterPath, "experimental-mounter-path", f.ExperimentalMounterPath, "[Experimental] Path of mounter binary. Leave empty to use the default mount.")

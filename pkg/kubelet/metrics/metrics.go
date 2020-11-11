@@ -87,6 +87,8 @@ const (
 	// Metrics keys for RuntimeClass
 	RunPodSandboxDurationKey = "run_podsandbox_duration_seconds"
 	RunPodSandboxErrorsKey   = "run_podsandbox_errors_total"
+
+	RemoveToManyPodAtOnceKey = "remove_too_many_pod_at_once_total"
 )
 
 var (
@@ -494,6 +496,14 @@ var (
 		},
 		[]string{"container_state"},
 	)
+
+	RemoveTooManyPodAtOnce = metrics.NewGauge(
+		&metrics.GaugeOpts{
+			Subsystem:      KubeletSubsystem,
+			Name:           RemoveToManyPodAtOnceKey,
+			Help:           "Remove too many pod at once, which has trigger circuit breaker.",
+			StabilityLevel: metrics.ALPHA,
+		})
 )
 
 var registerMetrics sync.Once
@@ -533,6 +543,7 @@ func Register(containerCache kubecontainer.RuntimeCache, collectors ...metrics.S
 		legacyregistry.MustRegister(DeprecatedDevicePluginAllocationLatency)
 		legacyregistry.MustRegister(RunningContainerCount)
 		legacyregistry.MustRegister(RunningPodCount)
+		legacyregistry.MustRegister(RemoveTooManyPodAtOnce)
 		if utilfeature.DefaultFeatureGate.Enabled(features.DynamicKubeletConfig) {
 			legacyregistry.MustRegister(AssignedConfig)
 			legacyregistry.MustRegister(ActiveConfig)

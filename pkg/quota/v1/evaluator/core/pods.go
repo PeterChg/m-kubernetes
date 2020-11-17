@@ -41,6 +41,8 @@ import (
 
 // the name used for object count quota
 var podObjectCountName = generic.ObjectCountQuotaResourceNameFor(corev1.SchemeGroupVersion.WithResource("pods").GroupResource())
+var VGpuPrefix corev1.ResourceName= "cloudml.vgpu/gpushare"
+var ORION_VGPU = "ORION_VGPU"
 
 // podResources are the set of resources managed by quota associated with pods.
 var podResources = []corev1.ResourceName{
@@ -344,6 +346,7 @@ func PodUsageFunc(obj runtime.Object, clock clock.Clock) (corev1.ResourceList, e
 	// TODO: ideally, we have pod level requests and limits in the future.
 	for i := range pod.Spec.Containers {
 		requests = quota.Add(requests, pod.Spec.Containers[i].Resources.Requests)
+		requests = quota.Add(requests, GetVGpuResourceRequest(pod.Spec.Containers[i]))
 		limits = quota.Add(limits, pod.Spec.Containers[i].Resources.Limits)
 	}
 	// InitContainers are run sequentially before other containers start, so the highest
@@ -351,6 +354,7 @@ func PodUsageFunc(obj runtime.Object, clock clock.Clock) (corev1.ResourceList, e
 	// the effective usage for both requests and limits.
 	for i := range pod.Spec.InitContainers {
 		requests = quota.Max(requests, pod.Spec.InitContainers[i].Resources.Requests)
+		requests = quota.Max(requests, GetVGpuResourceRequest(pod.Spec.InitContainers[i]))
 		limits = quota.Max(limits, pod.Spec.InitContainers[i].Resources.Limits)
 	}
 
@@ -460,4 +464,17 @@ func QuotaV1Pod(pod *corev1.Pod, clock clock.Clock) bool {
 		}
 	}
 	return true
+}
+
+func GetVGpuResourceRequest( container corev1.Container) corev1.ResourceList {
+	requests := corev1.ResourceList{}
+
+	for _, v := range container.Env {
+		if strings.Trim(v.Name, " ") == ORION_VGPU {
+			quantity, _ := resource.ParseQuantity(v.Value)
+			requests[VGpuPrefix] = quantity
+			break
+		}
+	}
+	return requests
 }

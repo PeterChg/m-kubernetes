@@ -441,7 +441,12 @@ func (g *genericScheduler) getLowerPriorityNominatedPods(pod *v1.Pod, nodeName s
 	var lowerPriorityPods []*v1.Pod
 	podPriority := podutil.GetPodPriority(pod)
 	for _, p := range pods {
-		if podutil.GetPodPriority(p) < podPriority {
+		pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
+		if err != nil {
+			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
+		}
+
+		if podutil.GetPodPriority(p) < podPriority || (pass && podutil.GetPodPriority(p) == podPriority) {
 			lowerPriorityPods = append(lowerPriorityPods, p)
 		}
 	}
@@ -1144,14 +1149,20 @@ func (g *genericScheduler) selectVictimsOnNode(
 			klog.V(5).Infof("Pod %v/%v is not eligible to be preempted because it has a preemptionPolicy of %v", p.Namespace, p.Name, *p.Spec.PreemptionPolicy)
 			continue
 		}
-		if podutil.GetPodPriority(p) < podPriority {
+
+		pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
+		if err != nil {
+			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
+		}
+
+		if podutil.GetPodPriority(p) < podPriority || (pass && podutil.GetPodPriority(p) == podPriority){
 			potentialVictims = append(potentialVictims, p)
 			if err := removePod(p); err != nil {
 				return nil, 0, false
 			}
 		}
 	}
-	// If the new pod does not fit after removing all the lower priority pods,
+	// If the new pod does not fit after removing all the lower priority pods(or the same priority overtimed cronjob pod),
 	// we are almost done and this node is not suitable for preemption. The only
 	// condition that we could check is if the "pod" is failing to schedule due to
 	// inter-pod affinity to one or more victims, but we have decided not to
@@ -1242,6 +1253,21 @@ func podEligibleToPreemptOthers(pod *v1.Pod, nodeNameToInfo map[string]*schedule
 		if nodeInfo, found := nodeNameToInfo[nomNodeName]; found {
 			podPriority := podutil.GetPodPriority(pod)
 			for _, p := range nodeInfo.Pods() {
+				if p.DeletionTimestamp != nil {
+					pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
+					if err != nil {
+						klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
+					}else {
+						if pass {
+							if podutil.GetPodPriority(p) == podPriority {
+								// There is a terminating cron job pod on the nominated node.
+								return false
+							}
+						}
+					}
+
+				}
+
 				if p.DeletionTimestamp != nil && podutil.GetPodPriority(p) < podPriority {
 					// There is a terminating pod on the nominated node.
 					return false

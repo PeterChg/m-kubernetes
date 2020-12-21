@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/features"
+	"github.com/robfig/cron"
 )
 
 // FindPort locates the container port for the given pod and portName.  If the
@@ -333,4 +334,31 @@ func GetPodPriority(pod *v1.Pod) int32 {
 	// that there was no global default priority class and the priority class
 	// name of the pod was empty. So, we resolve to the static default priority.
 	return 0
+}
+
+func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
+	var cronStandardNextStartTime, cronStandardNextStopTime time.Time
+	var timeNow = time.Now()
+
+	if cronStartTime, ok := pod.Labels["cron_start"]; !ok {
+		return false, nil
+	}else {
+		st, err := cron.ParseStandard(cronStartTime)
+		if err != nil {
+			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStartTime, err)
+		}
+		cronStandardNextStartTime = st.Next(timeNow)
+	}
+
+	if cronStopTime, ok := pod.Labels["cron_end"]; !ok {
+		return false, nil
+	}else {
+		st, err := cron.ParseStandard(cronStopTime)
+		if err != nil {
+			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStopTime, err)
+		}
+		cronStandardNextStopTime = st.Next(timeNow)
+	}
+
+	return cronStandardNextStartTime.Before(cronStandardNextStopTime), nil
 }

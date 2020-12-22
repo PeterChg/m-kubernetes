@@ -866,16 +866,16 @@ func makeNode(node string, milliCPU, memory int64) *v1.Node {
 
 func makeFakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool, ) *v1.Pod {
 	pod := &v1.Pod{}
-	pod.Labels = make(map[string]string)
+	pod.Annotations = make(map[string]string)
 
 	startTime := now.Add(-1 * time.Duration(relativeStartMinute * 60) * time.Second)
 	stopTime := now.Add(-1 * time.Duration(relativeStopMinute * 60) * time.Second)
 
 	if !knockoffStartTime{
-		pod.Labels["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
+		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
 	}
 	if !knockoffStopTime{
-		pod.Labels["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
+		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
 	}
 	return pod
 }
@@ -1269,11 +1269,11 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			nodes:      []string{"machine1", "machine2"},
 			pod:        &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "machine1", UID: types.UID("machine1")}, Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority}},
 			pods: []*v1.Pod{
-				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
                     Spec: v1.PodSpec{Containers: smallContainers, Priority: &midPriority, NodeName: "machine1"}},
-                {ObjectMeta: metav1.ObjectMeta{Name: "c", UID: types.UID("c"),Labels: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Labels},
+                {ObjectMeta: metav1.ObjectMeta{Name: "c", UID: types.UID("c"),Annotations: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations},
                     Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine1"}},
-                {ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+                {ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
                     Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine2"}}},
 			expected:                map[string]map[string]bool{"machine2": {"b": true}},
 			expectednumFilterCalled: 3,
@@ -1284,13 +1284,13 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			nodes:      []string{"machine1", "machine2"},
 			pod:        &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "machine1", UID: types.UID("machine1")}, Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority}},
 			pods: []*v1.Pod{
-				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Labels: makeFakeCronJobPod(time.Now(),-30, -60 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Annotations: makeFakeCronJobPod(time.Now(),-30, -60 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: smallContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Labels: makeFakeCronJobPod(time.Now(),-10, -100 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Annotations: makeFakeCronJobPod(time.Now(),-10, -100 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "c", UID: types.UID("c"),Labels: makeFakeCronJobPod(time.Now(),10, -100 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "c", UID: types.UID("c"),Annotations: makeFakeCronJobPod(time.Now(),10, -100 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "d", UID: types.UID("d"),Labels: makeFakeCronJobPod(time.Now(),10, -100 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "d", UID: types.UID("d"),Annotations: makeFakeCronJobPod(time.Now(),10, -100 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine2"}}},
 			expected:                map[string]map[string]bool{"machine1": {"a": true, "b": true}},
 			expectednumFilterCalled: 4,
@@ -1301,9 +1301,9 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			nodes:      []string{"machine1", "machine2"},
 			pod:        &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "machine1", UID: types.UID("machine1")}, Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority}},
 			pods: []*v1.Pod{
-				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Labels: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Annotations: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Labels: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Annotations: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine2"}}},
 			expected:                map[string]map[string]bool{},
 			expectednumFilterCalled: 2,
@@ -1314,9 +1314,9 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			nodes:      []string{"machine1", "machine2"},
 			pod:        &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "machine1", UID: types.UID("machine1")}, Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority}},
 			pods: []*v1.Pod{
-				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, true).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, true).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,true, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,true, false).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine2"}}},
 			expected:                map[string]map[string]bool{},
 			expectednumFilterCalled: 2,
@@ -1327,13 +1327,13 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			nodes:      []string{"machine1", "machine2"},
 			pod:        &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "machine1", UID: types.UID("machine1")}, Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority}},
 			pods: []*v1.Pod{
-				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: smallContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}},
 				{ObjectMeta: metav1.ObjectMeta{Name: "c", UID: types.UID("c"),},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "d", UID: types.UID("d"),Labels: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "d", UID: types.UID("d"),Annotations: makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority, NodeName: "machine2"}}},
 			expected:                map[string]map[string]bool{"machine1": {"a": true, "b": true}},
 			expectednumFilterCalled: 4,
@@ -1344,13 +1344,13 @@ func TestSelectNodesForPreemption(t *testing.T) {
 			nodes:      []string{"machine1", "machine2"},
 			pod:        &v1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "machine1", UID: types.UID("machine1")}, Spec: v1.PodSpec{Containers: largeContainers, Priority: &midPriority}},
 			pods: []*v1.Pod{
-				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "a", UID: types.UID("a"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: smallContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "b", UID: types.UID("b"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &highPriority, NodeName: "machine1"}},
 				{ObjectMeta: metav1.ObjectMeta{Name: "c", UID: types.UID("c"),},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "d", UID: types.UID("d"),Labels: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "d", UID: types.UID("d"),Annotations: makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: largeContainers, Priority: &highPriority, NodeName: "machine2"}}},
 			expected:                map[string]map[string]bool{},
 			expectednumFilterCalled: 2,
@@ -1877,15 +1877,15 @@ func TestPickOneNodeForPreemption(t *testing.T) {
 			pods: []*v1.Pod{
 				{ObjectMeta: metav1.ObjectMeta{Name: "m1.1", UID: types.UID("m1.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &lowPriority, NodeName: "machine1"}, Status: v1.PodStatus{StartTime: &startTime20190105}},
 				{ObjectMeta: metav1.ObjectMeta{Name: "m1.2", UID: types.UID("m1.2")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m1.3", UID: types.UID("m1.3"),Labels: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m1.3", UID: types.UID("m1.3"),Annotations: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: smallContainers, Priority: &highPriority, NodeName: "machine1"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
 
 				{ObjectMeta: metav1.ObjectMeta{Name: "m2.1", UID: types.UID("m2.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine2"}, Status: v1.PodStatus{StartTime: &startTime20190107}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m2.2", UID: types.UID("m2.2"),Labels: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m2.2", UID: types.UID("m2.2"),Annotations: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &highPriority, NodeName: "machine2"}, Status: v1.PodStatus{StartTime: &startTime20190102}},
 
 				{ObjectMeta: metav1.ObjectMeta{Name: "m3.1", UID: types.UID("m3.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &lowPriority, NodeName: "machine3"}, Status: v1.PodStatus{StartTime: &startTime20190104}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m3.3", UID: types.UID("m3.3"),Labels: makeFakeCronJobPod(time.Now(),-20 , -30 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m3.3", UID: types.UID("m3.3"),Annotations: makeFakeCronJobPod(time.Now(),-20 , -30 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &highPriority, NodeName: "machine3"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
 			},
 			expected: []string{"machine3"},
@@ -1898,21 +1898,21 @@ func TestPickOneNodeForPreemption(t *testing.T) {
 			pods: []*v1.Pod{
 				{ObjectMeta: metav1.ObjectMeta{Name: "m1.1", UID: types.UID("m1.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &lowPriority, NodeName: "machine1"}, Status: v1.PodStatus{StartTime: &startTime20190105}},
 				{ObjectMeta: metav1.ObjectMeta{Name: "m1.2", UID: types.UID("m1.2")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine1"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m1.3", UID: types.UID("m1.3"),Labels: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m1.3", UID: types.UID("m1.3"),Annotations: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: smallContainers, Priority: &highPriority, NodeName: "machine1"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
 
 				{ObjectMeta: metav1.ObjectMeta{Name: "m2.1", UID: types.UID("m2.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &lowPriority, NodeName: "machine2"}, Status: v1.PodStatus{StartTime: &startTime20190107}},
 				{ObjectMeta: metav1.ObjectMeta{Name: "m2.2", UID: types.UID("m2.2")}, Spec: v1.PodSpec{Containers: smallContainers, Priority: &lowPriority, NodeName: "machine2"}, Status: v1.PodStatus{StartTime: &startTime20190107}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m2.3", UID: types.UID("m2.3"),Labels: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m2.3", UID: types.UID("m2.3"),Annotations: makeFakeCronJobPod(time.Now(),30 , 20 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &highPriority, NodeName: "machine2"}, Status: v1.PodStatus{StartTime: &startTime20190102}},
 
 				{ObjectMeta: metav1.ObjectMeta{Name: "m3.1", UID: types.UID("m3.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &lowPriority, NodeName: "machine3"}, Status: v1.PodStatus{StartTime: &startTime20190104}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m3.3", UID: types.UID("m3.3"),Labels: makeFakeCronJobPod(time.Now(),20 , -30 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m3.3", UID: types.UID("m3.3"),Annotations: makeFakeCronJobPod(time.Now(),20 , -30 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: mediumContainers, Priority: &highPriority, NodeName: "machine3"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
 
 				{ObjectMeta: metav1.ObjectMeta{Name: "m4.1", UID: types.UID("m4.1")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &lowPriority, NodeName: "machine4"}, Status: v1.PodStatus{StartTime: &startTime20190104}},
 			    {ObjectMeta: metav1.ObjectMeta{Name: "m4.2", UID: types.UID("m4.2")}, Spec: v1.PodSpec{Containers: mediumContainers, Priority: &midPriority, NodeName: "machine4"}, Status: v1.PodStatus{StartTime: &startTime20190103}},
-				{ObjectMeta: metav1.ObjectMeta{Name: "m4.3", UID: types.UID("m4.3"),Labels: makeFakeCronJobPod(time.Now(),-20 , -30 ,false, false).Labels},
+				{ObjectMeta: metav1.ObjectMeta{Name: "m4.3", UID: types.UID("m4.3"),Annotations: makeFakeCronJobPod(time.Now(),-20 , -30 ,false, false).Annotations},
 					Spec: v1.PodSpec{Containers: smallContainers, Priority: &highPriority, NodeName: "machine4"}, Status: v1.PodStatus{StartTime: &startTime20190102}},
 			},
 			expected: []string{"machine2"},

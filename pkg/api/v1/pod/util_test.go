@@ -810,16 +810,16 @@ func TestGetPodPriority(t *testing.T) {
 
 func fakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool, ) *v1.Pod {
 	pod := &v1.Pod{}
-	pod.Labels = make(map[string]string)
+	pod.Annotations = make(map[string]string)
 
 	startTime := now.Add(-1 * time.Duration(relativeStartMinute * 60) * time.Second)
 	stopTime := now.Add(-1 * time.Duration(relativeStopMinute * 60) * time.Second)
 
 	if !knockoffStartTime{
-		pod.Labels["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
+		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
 	}
 	if !knockoffStopTime{
-		pod.Labels["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
+		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
 	}
 	return pod
 }

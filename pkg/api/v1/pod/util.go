@@ -340,7 +340,7 @@ func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
 	var cronStandardNextStartTime, cronStandardNextStopTime time.Time
 	var timeNow = time.Now()
 
-	if cronStartTime, ok := pod.Labels["cron_start"]; !ok {
+	if cronStartTime, ok := pod.Annotations["cron_start"]; !ok {
 		return false, nil
 	}else {
 		st, err := cron.ParseStandard(cronStartTime)
@@ -350,7 +350,7 @@ func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
 		cronStandardNextStartTime = st.Next(timeNow)
 	}
 
-	if cronStopTime, ok := pod.Labels["cron_end"]; !ok {
+	if cronStopTime, ok := pod.Annotations["cron_end"]; !ok {
 		return false, nil
 	}else {
 		st, err := cron.ParseStandard(cronStopTime)

@@ -440,13 +440,15 @@ func (g *genericScheduler) getLowerPriorityNominatedPods(pod *v1.Pod, nodeName s
 
 	var lowerPriorityPods []*v1.Pod
 	podPriority := podutil.GetPodPriority(pod)
+	isTimeOutCronJobPod,_ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+
 	for _, p := range pods {
 		pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
 		if err != nil {
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
 		}
 
-		if podutil.GetPodPriority(p) < podPriority || (pass && podutil.GetPodPriority(p) == podPriority) {
+		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority) {
 			lowerPriorityPods = append(lowerPriorityPods, p)
 		}
 	}
@@ -1144,6 +1146,8 @@ func (g *genericScheduler) selectVictimsOnNode(
 	// As the first step, remove all the lower priority pods from the node and
 	// check if the given pod can be scheduled.
 	podPriority := podutil.GetPodPriority(pod)
+	isTimeOutCronJobPod,_ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+
 	for _, p := range nodeInfo.Pods() {
 		if enableNonPreempting && p.Spec.PreemptionPolicy != nil && (*p.Spec.PreemptionPolicy == v1.NonPreemptible || *p.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
 			klog.V(5).Infof("Pod %v/%v is not eligible to be preempted because it has a preemptionPolicy of %v", p.Namespace, p.Name, *p.Spec.PreemptionPolicy)
@@ -1155,7 +1159,7 @@ func (g *genericScheduler) selectVictimsOnNode(
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
 		}
 
-		if podutil.GetPodPriority(p) < podPriority || (pass && podutil.GetPodPriority(p) == podPriority){
+		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority){
 			potentialVictims = append(potentialVictims, p)
 			if err := removePod(p); err != nil {
 				return nil, 0, false

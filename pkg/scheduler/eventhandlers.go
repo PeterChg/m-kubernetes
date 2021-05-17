@@ -207,6 +207,49 @@ func (sched *Scheduler) deletePodFromSchedulingQueue(obj interface{}) {
 	sched.Framework.RejectWaitingPod(pod.UID)
 }
 
+func (sched *Scheduler) addPodNominateInfo(obj interface{}) {
+	if err := sched.SchedulingQueue.AddNorminatedPods(obj.(*v1.Pod)); err != nil {
+		utilruntime.HandleError(fmt.Errorf("unable to queue %T: %v", obj, err))
+		return
+	}
+	klog.V(5).Infof("add pod:%s nominate info", obj.(*v1.Pod).Name)
+}
+
+func (sched *Scheduler) updatePodNominateInfo(oldObj, newObj interface{}) {
+	pod := newObj.(*v1.Pod)
+	if sched.skipPodUpdate(pod) {
+		return
+	}
+	if err := sched.SchedulingQueue.UpdateNorminatedPods(oldObj.(*v1.Pod), pod); err != nil {
+		utilruntime.HandleError(fmt.Errorf("unable to update %T: %v", newObj, err))
+		return
+	}
+	klog.V(5).Infof("update pod:%s nominate info", pod.Name)
+}
+
+func (sched *Scheduler) deletePodNominateInfo(obj interface{}) {
+	var pod *v1.Pod
+	switch t := obj.(type) {
+	case *v1.Pod:
+		pod = obj.(*v1.Pod)
+	case cache.DeletedFinalStateUnknown:
+		var ok bool
+		pod, ok = t.Obj.(*v1.Pod)
+		if !ok {
+			utilruntime.HandleError(fmt.Errorf("unable to convert object %T to *v1.Pod in %T", obj, sched))
+			return
+		}
+	default:
+		utilruntime.HandleError(fmt.Errorf("unable to handle object in %T: %T", sched, obj))
+		return
+	}
+	if err := sched.SchedulingQueue.DeleteNorminatedPods(pod); err != nil {
+		utilruntime.HandleError(fmt.Errorf("unable to dequeue %T: %v", obj, err))
+		return
+	}
+	klog.V(5).Infof("delete pod:%s nominate info", pod.Name)
+}
+
 func (sched *Scheduler) addPodToCache(obj interface{}) {
 	pod, ok := obj.(*v1.Pod)
 	if !ok {
@@ -392,6 +435,32 @@ func AddAllEventHandlers(
 				AddFunc:    sched.addPodToSchedulingQueue,
 				UpdateFunc: sched.updatePodInSchedulingQueue,
 				DeleteFunc: sched.deletePodFromSchedulingQueue,
+			},
+		},
+	)
+
+	// pod nominate info
+	podInformer.Informer().AddEventHandler(
+		cache.FilteringResourceEventHandler{
+			FilterFunc: func(obj interface{}) bool {
+				switch t := obj.(type) {
+				case *v1.Pod:
+					return !assignedPod(t) && !responsibleForPod(t, schedulerName)
+				case cache.DeletedFinalStateUnknown:
+					if pod, ok := t.Obj.(*v1.Pod); ok {
+						return !assignedPod(pod) && !responsibleForPod(pod, schedulerName)
+					}
+					utilruntime.HandleError(fmt.Errorf("unable to convert object %T to *v1.Pod in %T", obj, sched))
+					return false
+				default:
+					utilruntime.HandleError(fmt.Errorf("unable to handle object in %T: %T", sched, obj))
+					return false
+				}
+			},
+			Handler: cache.ResourceEventHandlerFuncs{
+				AddFunc:    sched.addPodNominateInfo,
+				UpdateFunc: sched.updatePodNominateInfo,
+				DeleteFunc: sched.deletePodNominateInfo,
 			},
 		},
 	)

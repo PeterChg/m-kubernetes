@@ -96,6 +96,10 @@ type SchedulingQueue interface {
 	// DeleteNominatedPodIfExists deletes nominatedPod from internal cache
 	DeleteNominatedPodIfExists(pod *v1.Pod)
 	// NumUnschedulablePods returns the number of unschedulable pods exist in the SchedulingQueue.
+
+	AddNorminatedPods(pod *v1.Pod) error
+	UpdateNorminatedPods(oldPod, newPod *v1.Pod) error
+	DeleteNorminatedPods(pod *v1.Pod) error
 	NumUnschedulablePods() int
 }
 
@@ -506,6 +510,33 @@ func (p *PriorityQueue) Update(oldPod, newPod *v1.Pod) error {
 		p.cond.Broadcast()
 	}
 	return err
+}
+
+// Update updates pod Norminated info not assigened to this scheduler
+func (p *PriorityQueue) AddNorminatedPods(pod *v1.Pod) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	p.nominatedPods.add(pod,"")
+	return nil
+}
+
+// Update updates pod Norminated info not assigened to this scheduler
+func (p *PriorityQueue) UpdateNorminatedPods(oldPod, newPod *v1.Pod) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	p.nominatedPods.update(oldPod, newPod)
+	return nil
+}
+
+// Delete pod Norminated info not assigened to this scheduler
+func (p *PriorityQueue) DeleteNorminatedPods(pod *v1.Pod) error {
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
+	p.nominatedPods.delete(pod)
+	return nil
 }
 
 // Delete deletes the item from either of the two queues. It assumes the pod is

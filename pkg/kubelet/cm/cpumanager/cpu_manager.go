@@ -378,12 +378,29 @@ func (m *manager) reconcileState() (success []reconciledContainer, failure []rec
 				continue
 			}
 
+			cstatus, err := findContainerStatusByName(&status, container.Name)
+			if err != nil {
+				klog.Warning("[cpumanager] reconcileState: skipping container; container status not found in pod status(pod: %s, container: %s, error: %v)", pod.Name, container.Name, err)
+				failure = append(failure, reconciledContainer{pod.Name, container.Name, ""})
+				continue
+			}
+
 			// Check whether container is present in state, there may be 3 reasons why it's not present:
 			// - policy does not want to track the container
 			// - kubelet has just been restarted - and there is no previous state file
 			// - container has been removed from state by RemoveContainer call (DeletionTimestamp is set)
 			if _, ok := m.state.GetCPUSet(containerID); !ok {
 				if status.Phase == v1.PodRunning && pod.DeletionTimestamp == nil {
+					if cstatus.State.Terminated != nil {
+						// The container is terminated but we can't call m.RemoveContainer()
+						// here because it could remove the allocated cpuset for the container
+						// which may be in the process of being restarted.  That would result
+						// in the container losing any exclusively-allocated CPUs that it
+						// was allocated.
+						klog.V(4).Infof("[cpumanager] reconcileState: container is terminated (pod: %s, container: %s, container id: %s)", pod.Name, container.Name, containerID)
+						continue
+					}
+					
 					klog.V(4).Infof("[cpumanager] reconcileState: container is not present in state - trying to add (pod: %s, container: %s, container id: %s)", pod.Name, container.Name, containerID)
 					err := m.AddContainer(pod, &container, containerID)
 					if err != nil {
@@ -435,6 +452,14 @@ func findContainerIDByName(status *v1.PodStatus, name string) (string, error) {
 	return "", fmt.Errorf("unable to find ID for container with name %v in pod status (it may not be running)", name)
 }
 
+func findContainerStatusByName(status *v1.PodStatus, name string) (*v1.ContainerStatus, error) {
+	for _, containerStatus := range append(status.InitContainerStatuses, status.ContainerStatuses...) {
+		if containerStatus.Name == name {
+			return &containerStatus, nil
+		}
+	}
+	return nil, fmt.Errorf("unable to find status for container with name %v in pod status (it may not be running)", name)
+}
 func (m *manager) updateContainerCPUSet(containerID string, cpus cpuset.CPUSet) error {
 	// TODO: Consider adding a `ResourceConfigForContainer` helper in
 	// helpers_linux.go similar to what exists for pods.

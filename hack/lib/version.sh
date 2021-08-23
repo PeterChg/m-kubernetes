@@ -106,6 +106,7 @@ kube::version::get_version_vars() {
         fi
       fi
 
+      KUBE_GIT_VERSION="v1.21.3-mi-v1.21.3-dev"
       # If KUBE_GIT_VERSION is not a valid Semantic Version, then refuse to build.
       if ! [[ "${KUBE_GIT_VERSION}" =~ ^v([0-9]+)\.([0-9]+)(\.[0-9]+)?(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
           kube::log::error "KUBE_GIT_VERSION should be a valid Semantic Version. Current value: ${KUBE_GIT_VERSION}"

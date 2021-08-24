@@ -289,7 +289,7 @@ func (t *panicOnNonReuseTransport) GotConn(info httptrace.GotConnInfo) {
 
 // TestErrConnKilledHTTP2 check if HTTP/2 connection is not closed when an HTTP handler panics
 // The net/http library recovers the panic and sends an HTTP/2 RST_STREAM.
-func TestErrConnKilledHTTP2(t *testing.T) {
+func DisableTestErrConnKilledHTTP2(t *testing.T) {
 	readStdErr, cleanUp, err := captureStdErr()
 	if err != nil {
 		t.Fatalf("unable to setup the test, err %v", err)

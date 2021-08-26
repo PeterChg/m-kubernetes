@@ -98,6 +98,22 @@ func getDefaultDefaultPreemptionArgs() *config.DefaultPreemptionArgs {
 	return dpa
 }
 
+func makeFakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool, ) *v1.Pod {
+	pod := &v1.Pod{}
+	pod.Annotations = make(map[string]string)
+
+	startTime := now.Add(-1 * time.Duration(relativeStartMinute * 60) * time.Second)
+	stopTime := now.Add(-1 * time.Duration(relativeStopMinute * 60) * time.Second)
+
+	if !knockoffStartTime{
+		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
+	}
+	if !knockoffStopTime{
+		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
+	}
+	return pod
+}
+
 func TestPostFilter(t *testing.T) {
 	onePodRes := map[v1.ResourceName]string{v1.ResourcePods: "1"}
 	nodeRes := map[v1.ResourceName]string{v1.ResourceCPU: "200m", v1.ResourceMemory: "400"}
@@ -1640,6 +1656,101 @@ func TestPreempt(t *testing.T) {
 			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
 			expectedNode:   "",
 			expectedPods:   nil,
+		},
+		{
+			name: "preempt cron tasks that have time out",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(midPriority).Req(veryLargeRes).
+				Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.2").UID("p1.2").Namespace(v1.NamespaceDefault).Node("node1").Priority(midPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(highPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(mediumRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node3",
+			expectedPods:   []string{"p3.1"},
+		},
+		{
+			name: "preempt cron tasks that have start in advance, mixed priority pods are preempted",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(midPriority).Req(veryLargeRes).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),-30, -20 ,false, false).Annotations).Obj(),
+				st.MakePod().Name("p1.2").UID("p1.2").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(highPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(mediumRes).PreemptionPolicy(v1.NonPreemptible).
+					Annotation(makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node1",
+			expectedPods:   []string{"p1.1","p1.2"},
+		},
+		{
+			name: "preempt cron tasks that whether timed out or not",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(midPriority).Req(veryLargeRes).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(lowPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(highPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(lowPriority).Req(mediumRes).PreemptionPolicy(v1.NonPreemptible).
+					Annotation(makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node1",
+			expectedPods:   []string{"p1.1"},
+		},
+		{
+			name: "can not preempt cron tasks that have not set cron task info corrected",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(midPriority).Req(veryLargeRes).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(midPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, 20 ,false, true).Annotations).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(lowPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(mediumRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, 20 ,true, false).Annotations).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node2",
+			expectedPods:   []string{"p2.1"},
+		},
+		{
+			name: "preempt cron tasks that not in time slot configed,mixed priority pods are preempted",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(midPriority).Req(veryLargeRes).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(midPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(midPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(lowPriority).Req(mediumRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node3",
+			expectedPods:   []string{"p3.1"},
+		},
+		{
+			name: "running cron task can preempt cron tasks that have start in advance or timeout",
+			pod:  st.MakePod().Name("p").UID("p").Namespace(v1.NamespaceDefault).Priority(midPriority).Req(veryLargeRes).
+				Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+			pods: []*v1.Pod{
+				st.MakePod().Name("p1.1").UID("p1.1").Namespace(v1.NamespaceDefault).Node("node1").Priority(midPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),-30, -60 ,false, false).Annotations).Obj(),
+				st.MakePod().Name("p1.2").UID("p1.2").Namespace(v1.NamespaceDefault).Node("node1").Priority(midPriority).Req(smallRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, 20 ,false, false).Annotations).Obj(),
+				st.MakePod().Name("p2.1").UID("p2.1").Namespace(v1.NamespaceDefault).Node("node2").Priority(midPriority).Req(largeRes).Obj(),
+				st.MakePod().Name("p3.1").UID("p3.1").Namespace(v1.NamespaceDefault).Node("node3").Priority(midPriority).Req(mediumRes).
+					Annotation(makeFakeCronJobPod(time.Now(),30, -20 ,false, false).Annotations).Obj(),
+			},
+			nodeNames:      []string{"node1", "node2", "node3"},
+			registerPlugin: st.RegisterPluginAsExtensions(noderesources.FitName, noderesources.NewFit, "Filter", "PreFilter"),
+			expectedNode:   "node1",
+			expectedPods:   []string{"p1.1","p1.2"},
 		},
 	}
 

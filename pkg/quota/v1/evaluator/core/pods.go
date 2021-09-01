@@ -41,7 +41,7 @@ import (
 
 // the name used for object count quota
 var podObjectCountName = generic.ObjectCountQuotaResourceNameFor(corev1.SchemeGroupVersion.WithResource("pods").GroupResource())
-var VGpuPrefix corev1.ResourceName= "cloudml.vgpu/gpushare"
+var VGpuPrefix corev1.ResourceName = "cloudml.vgpu/gpushare"
 var ORION_VGPU = "ORION_VGPU"
 
 // podResources are the set of resources managed by quota associated with pods.
@@ -466,7 +466,7 @@ func QuotaV1Pod(pod *corev1.Pod, clock clock.Clock) bool {
 	return true
 }
 
-func GetVGpuResourceRequest( container corev1.Container) corev1.ResourceList {
+func GetVGpuResourceRequest(container corev1.Container) corev1.ResourceList {
 	requests := corev1.ResourceList{}
 
 	for _, v := range container.Env {

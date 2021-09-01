@@ -259,10 +259,10 @@ func PodEligibleToPreemptOthers(pod *v1.Pod, nodeInfos framework.NodeInfoLister,
 			podPriority := corev1helpers.PodPriority(pod)
 			for _, p := range nodeInfo.Pods {
 				if p.Pod.DeletionTimestamp != nil {
-					pass,err := util.IsCrobJobPodRunNotInConfigTimeSlot(p.Pod)
+					pass, err := util.IsCrobJobPodRunNotInConfigTimeSlot(p.Pod)
 					if err != nil {
 						klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Pod.Namespace, p.Pod.Name, err.Error())
-					}else {
+					} else {
 						if pass {
 							if corev1helpers.PodPriority(p.Pod) == podPriority {
 								// There is a terminating cron job pod on the nominated node.
@@ -641,7 +641,7 @@ func selectVictimsOnNode(
 	// As the first step, remove all the lower priority pods from the node and
 	// check if the given pod can be scheduled.
 	podPriority := corev1helpers.PodPriority(pod)
-	isTimeOutCronJobPod,_ := util.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+	isTimeOutCronJobPod, _ := util.IsCrobJobPodRunNotInConfigTimeSlot(pod)
 
 	for _, pi := range nodeInfo.Pods {
 		if pi.Pod.Spec.PreemptionPolicy != nil && (*pi.Pod.Spec.PreemptionPolicy == v1.NonPreemptible ||
@@ -651,7 +651,7 @@ func selectVictimsOnNode(
 			continue
 		}
 
-		pass,err := util.IsCrobJobPodRunNotInConfigTimeSlot(pi.Pod)
+		pass, err := util.IsCrobJobPodRunNotInConfigTimeSlot(pi.Pod)
 		if err != nil {
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", pi.Pod.Namespace, pi.Pod.Name, err.Error())
 		}
@@ -766,10 +766,10 @@ func getLowerPriorityNominatedPods(pn framework.PodNominator, pod *v1.Pod, nodeN
 
 	var lowerPriorityPods []*v1.Pod
 	podPriority := corev1helpers.PodPriority(pod)
-	isTimeOutCronJobPod,_ := util.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+	isTimeOutCronJobPod, _ := util.IsCrobJobPodRunNotInConfigTimeSlot(pod)
 
 	for _, pi := range podInfos {
-		pass,err := util.IsCrobJobPodRunNotInConfigTimeSlot(pi.Pod)
+		pass, err := util.IsCrobJobPodRunNotInConfigTimeSlot(pi.Pod)
 		if err != nil {
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", pi.Pod.Namespace, pi.Pod.Name, err.Error())
 		}

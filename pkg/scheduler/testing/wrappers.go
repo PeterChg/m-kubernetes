@@ -370,6 +370,15 @@ func (p *PodWrapper) Label(k, v string) *PodWrapper {
 	return p
 }
 
+// Label sets a {k,v} pair to the inner pod.
+func (p *PodWrapper) Annotation(kv map[string]string) *PodWrapper {
+	if p.Labels == nil {
+		p.Labels = make(map[string]string)
+	}
+	p.Annotations = kv
+	return p
+}
+
 // Req adds a new container to the inner pod with given resource map.
 func (p *PodWrapper) Req(resMap map[v1.ResourceName]string) *PodWrapper {
 	if len(resMap) == 0 {

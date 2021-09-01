@@ -57,7 +57,7 @@ type PriorityClass struct {
 	Description string `json:"description,omitempty" protobuf:"bytes,4,opt,name=description"`
 
 	// PreemptionPolicy is the Policy for preempting pods with lower priority.
-	// One of Never, PreemptLowerPriority.
+	// One of Never, PreemptLowerPriority, NonPreemptible, NonPreemptiblePreemptNever.
 	// Defaults to PreemptLowerPriority if unset.
 	// This field is beta-level, gated by the NonPreemptingPriority feature-gate.
 	// +optional

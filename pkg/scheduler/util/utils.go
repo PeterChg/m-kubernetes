@@ -32,6 +32,7 @@ import (
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
+	"github.com/robfig/cron"
 )
 
 // GetPodFullName returns a name that uniquely identifies a pod.
@@ -145,4 +146,31 @@ func ClearNominatedNodeName(cs kubernetes.Interface, pods ...*v1.Pod) utilerrors
 func IsScalarResourceName(name v1.ResourceName) bool {
 	return v1helper.IsExtendedResourceName(name) || v1helper.IsHugePageResourceName(name) ||
 		v1helper.IsPrefixedNativeResource(name) || v1helper.IsAttachableVolumeResourceName(name)
+}
+
+func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
+	var cronStandardNextStartTime, cronStandardNextStopTime time.Time
+	var timeNow = time.Now()
+
+	if cronStartTime, ok := pod.Annotations["cron_start"]; !ok {
+		return false, nil
+	}else {
+		st, err := cron.ParseStandard(cronStartTime)
+		if err != nil {
+			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStartTime, err)
+		}
+		cronStandardNextStartTime = st.Next(timeNow)
+	}
+
+	if cronStopTime, ok := pod.Annotations["cron_end"]; !ok {
+		return false, nil
+	}else {
+		st, err := cron.ParseStandard(cronStopTime)
+		if err != nil {
+			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStopTime, err)
+		}
+		cronStandardNextStopTime = st.Next(timeNow)
+	}
+
+	return cronStandardNextStartTime.Before(cronStandardNextStopTime), nil
 }

@@ -242,7 +242,8 @@ func (pl *DefaultPreemption) FindCandidates(ctx context.Context, state *framewor
 // We look at the node that is nominated for this pod and as long as there are
 // terminating pods on the node, we don't consider this for preempting more pods.
 func PodEligibleToPreemptOthers(pod *v1.Pod, nodeInfos framework.NodeInfoLister, nominatedNodeStatus *framework.Status) bool {
-	if pod.Spec.PreemptionPolicy != nil && *pod.Spec.PreemptionPolicy == v1.PreemptNever {
+	if pod.Spec.PreemptionPolicy != nil && (*pod.Spec.PreemptionPolicy == v1.PreemptNever ||
+		*pod.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
 		klog.V(5).InfoS("Pod is not eligible for preemption because it has a preemptionPolicy of Never", "pod", klog.KObj(pod))
 		return false
 	}
@@ -257,6 +258,21 @@ func PodEligibleToPreemptOthers(pod *v1.Pod, nodeInfos framework.NodeInfoLister,
 		if nodeInfo, _ := nodeInfos.Get(nomNodeName); nodeInfo != nil {
 			podPriority := corev1helpers.PodPriority(pod)
 			for _, p := range nodeInfo.Pods {
+				if p.Pod.DeletionTimestamp != nil {
+					pass,err := util.IsCrobJobPodRunNotInConfigTimeSlot(p.Pod)
+					if err != nil {
+						klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Pod.Namespace, p.Pod.Name, err.Error())
+					}else {
+						if pass {
+							if corev1helpers.PodPriority(p.Pod) == podPriority {
+								// There is a terminating cron job pod on the nominated node.
+								return false
+							}
+						}
+					}
+
+				}
+
 				if p.Pod.DeletionTimestamp != nil && corev1helpers.PodPriority(p.Pod) < podPriority {
 					// There is a terminating pod on the nominated node.
 					return false
@@ -625,8 +641,22 @@ func selectVictimsOnNode(
 	// As the first step, remove all the lower priority pods from the node and
 	// check if the given pod can be scheduled.
 	podPriority := corev1helpers.PodPriority(pod)
+	isTimeOutCronJobPod,_ := util.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+
 	for _, pi := range nodeInfo.Pods {
-		if corev1helpers.PodPriority(pi.Pod) < podPriority {
+		if pi.Pod.Spec.PreemptionPolicy != nil && (*pi.Pod.Spec.PreemptionPolicy == v1.NonPreemptible ||
+			*pi.Pod.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
+			klog.V(5).Infof("Pod %v/%v is not eligible to be preempted because it has a preemptionPolicy of %v",
+				pi.Pod.Namespace, pi.Pod.Name, *pi.Pod.Spec.PreemptionPolicy)
+			continue
+		}
+
+		pass,err := util.IsCrobJobPodRunNotInConfigTimeSlot(pi.Pod)
+		if err != nil {
+			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", pi.Pod.Namespace, pi.Pod.Name, err.Error())
+		}
+		//the same priority timeout cronJoB can not preempt each other
+		if corev1helpers.PodPriority(pi.Pod) < podPriority || (!isTimeOutCronJobPod && pass && corev1helpers.PodPriority(pi.Pod) == podPriority) {
 			potentialVictims = append(potentialVictims, pi)
 			if err := removePod(pi); err != nil {
 				return nil, 0, framework.AsStatus(err)
@@ -640,7 +670,7 @@ func selectVictimsOnNode(
 		return nil, 0, framework.NewStatus(framework.UnschedulableAndUnresolvable, message)
 	}
 
-	// If the new pod does not fit after removing all the lower priority pods,
+	// If the new pod does not fit after removing all the lower priority pods(or the same priority overtimed cronjob pod),
 	// we are almost done and this node is not suitable for preemption. The only
 	// condition that we could check is if the "pod" is failing to schedule due to
 	// inter-pod affinity to one or more victims, but we have decided not to
@@ -736,8 +766,15 @@ func getLowerPriorityNominatedPods(pn framework.PodNominator, pod *v1.Pod, nodeN
 
 	var lowerPriorityPods []*v1.Pod
 	podPriority := corev1helpers.PodPriority(pod)
+	isTimeOutCronJobPod,_ := util.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+
 	for _, pi := range podInfos {
-		if corev1helpers.PodPriority(pi.Pod) < podPriority {
+		pass,err := util.IsCrobJobPodRunNotInConfigTimeSlot(pi.Pod)
+		if err != nil {
+			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", pi.Pod.Namespace, pi.Pod.Name, err.Error())
+		}
+		//the same priority timeout cronJoB can not preempt each other
+		if corev1helpers.PodPriority(pi.Pod) < podPriority || (!isTimeOutCronJobPod && pass && corev1helpers.PodPriority(pi.Pod) == podPriority) {
 			lowerPriorityPods = append(lowerPriorityPods, pi.Pod)
 		}
 	}

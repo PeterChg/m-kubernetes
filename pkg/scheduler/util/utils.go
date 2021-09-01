@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/robfig/cron"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -32,7 +33,6 @@ import (
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
-	"github.com/robfig/cron"
 )
 
 // GetPodFullName returns a name that uniquely identifies a pod.
@@ -148,13 +148,13 @@ func IsScalarResourceName(name v1.ResourceName) bool {
 		v1helper.IsPrefixedNativeResource(name) || v1helper.IsAttachableVolumeResourceName(name)
 }
 
-func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
+func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error) {
 	var cronStandardNextStartTime, cronStandardNextStopTime time.Time
 	var timeNow = time.Now()
 
 	if cronStartTime, ok := pod.Annotations["cron_start"]; !ok {
 		return false, nil
-	}else {
+	} else {
 		st, err := cron.ParseStandard(cronStartTime)
 		if err != nil {
 			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStartTime, err)
@@ -164,7 +164,7 @@ func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
 
 	if cronStopTime, ok := pod.Annotations["cron_end"]; !ok {
 		return false, nil
-	}else {
+	} else {
 		st, err := cron.ParseStandard(cronStopTime)
 		if err != nil {
 			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStopTime, err)

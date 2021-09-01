@@ -50,9 +50,9 @@ func TestPodConstraintsFunc(t *testing.T) {
 							Requests: api.ResourceList{api.ResourceCPU: resource.MustParse("1m")},
 							Limits:   api.ResourceList{api.ResourceCPU: resource.MustParse("2m")},
 						},
-						Env: [] api.EnvVar{
+						Env: []api.EnvVar{
 							{
-								Name: ORION_VGPU,
+								Name:  ORION_VGPU,
 								Value: "3",
 							},
 						},
@@ -71,11 +71,11 @@ func TestPodConstraintsFunc(t *testing.T) {
 								//api.ResourceCPU: resource.MustParse("1m"),
 								api.ResourceName(VGpuPrefix): resource.MustParse("3"),
 							},
-							Limits:   api.ResourceList{api.ResourceCPU: resource.MustParse("2m")},
+							Limits: api.ResourceList{api.ResourceCPU: resource.MustParse("2m")},
 						},
-						Env: [] api.EnvVar{
+						Env: []api.EnvVar{
 							{
-								Name: ORION_VGPU,
+								Name:  ORION_VGPU,
 								Value: "2",
 							},
 						},
@@ -122,9 +122,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 							Requests: api.ResourceList{api.ResourceCPU: resource.MustParse("1m")},
 							Limits:   api.ResourceList{api.ResourceCPU: resource.MustParse("2m")},
 						},
-						Env: [] api.EnvVar{
+						Env: []api.EnvVar{
 							{
-								Name: ORION_VGPU,
+								Name:  ORION_VGPU,
 								Value: "3",
 							},
 						},
@@ -136,7 +136,7 @@ func TestPodEvaluatorUsage(t *testing.T) {
 				corev1.ResourceLimitsCPU:   resource.MustParse("2m"),
 				corev1.ResourcePods:        resource.MustParse("1"),
 				corev1.ResourceCPU:         resource.MustParse("1m"),
-				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix): resource.MustParse("3"),
+				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix):        resource.MustParse("3"),
 				generic.ObjectCountQuotaResourceNameFor(schema.GroupResource{Resource: "pods"}): resource.MustParse("1"),
 			},
 		},
@@ -148,9 +148,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 							Requests: api.ResourceList{api.ResourceMemory: resource.MustParse("1m")},
 							Limits:   api.ResourceList{api.ResourceMemory: resource.MustParse("2m")},
 						},
-						Env: [] api.EnvVar{
+						Env: []api.EnvVar{
 							{
-								Name: ORION_VGPU,
+								Name:  ORION_VGPU,
 								Value: "4",
 							},
 						},
@@ -162,7 +162,7 @@ func TestPodEvaluatorUsage(t *testing.T) {
 				corev1.ResourceLimitsMemory:   resource.MustParse("2m"),
 				corev1.ResourcePods:           resource.MustParse("1"),
 				corev1.ResourceMemory:         resource.MustParse("1m"),
-				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix): resource.MustParse("4"),
+				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix):        resource.MustParse("4"),
 				generic.ObjectCountQuotaResourceNameFor(schema.GroupResource{Resource: "pods"}): resource.MustParse("1"),
 			},
 		},
@@ -174,9 +174,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 							Requests: api.ResourceList{api.ResourceEphemeralStorage: resource.MustParse("32Mi")},
 							Limits:   api.ResourceList{api.ResourceEphemeralStorage: resource.MustParse("64Mi")},
 						},
-						Env: [] api.EnvVar{
+						Env: []api.EnvVar{
 							{
-								Name: "TEST-VGPU",
+								Name:  "TEST-VGPU",
 								Value: "4",
 							},
 						},
@@ -289,9 +289,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 						Resources: api.ResourceRequirements{
 							Requests: api.ResourceList{api.ResourceName(api.ResourceHugePagesPrefix + "2Mi"): resource.MustParse("100Mi")},
 						},
-						Env: [] api.EnvVar{
+						Env: []api.EnvVar{
 							{
-								Name: ORION_VGPU,
+								Name:  ORION_VGPU,
 								Value: "4",
 							},
 						},
@@ -299,8 +299,8 @@ func TestPodEvaluatorUsage(t *testing.T) {
 				},
 			},
 			usage: corev1.ResourceList{
-				corev1.ResourceName(api.ResourceHugePagesPrefix + "2Mi"):         resource.MustParse("100Mi"),
-				corev1.ResourceName(api.ResourceRequestsHugePagesPrefix + "2Mi"): resource.MustParse("100Mi"),
+				corev1.ResourceName(api.ResourceHugePagesPrefix + "2Mi"):                 resource.MustParse("100Mi"),
+				corev1.ResourceName(api.ResourceRequestsHugePagesPrefix + "2Mi"):         resource.MustParse("100Mi"),
 				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix): resource.MustParse("4"),
 				corev1.ResourcePods: resource.MustParse("1"),
 				generic.ObjectCountQuotaResourceNameFor(schema.GroupResource{Resource: "pods"}): resource.MustParse("1"),
@@ -358,9 +358,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 									api.ResourceName("example.com/dongle"): resource.MustParse("4"),
 								},
 							},
-							Env: [] api.EnvVar{
+							Env: []api.EnvVar{
 								{
-									Name: ORION_VGPU,
+									Name:  ORION_VGPU,
 									Value: "11",
 								},
 							},
@@ -378,9 +378,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 									api.ResourceName("example.com/dongle"): resource.MustParse("2"),
 								},
 							},
-							Env: [] api.EnvVar{
+							Env: []api.EnvVar{
 								{
-									Name: ORION_VGPU,
+									Name:  ORION_VGPU,
 									Value: "1",
 								},
 							},
@@ -400,9 +400,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 									api.ResourceName("example.com/dongle"): resource.MustParse("1"),
 								},
 							},
-							Env: [] api.EnvVar{
+							Env: []api.EnvVar{
 								{
-									Name: ORION_VGPU,
+									Name:  ORION_VGPU,
 									Value: "5",
 								},
 							},
@@ -420,9 +420,9 @@ func TestPodEvaluatorUsage(t *testing.T) {
 									api.ResourceName("example.com/dongle"): resource.MustParse("2"),
 								},
 							},
-							Env: [] api.EnvVar{
+							Env: []api.EnvVar{
 								{
-									Name: ORION_VGPU,
+									Name:  ORION_VGPU,
 									Value: "5",
 								},
 							},
@@ -431,15 +431,15 @@ func TestPodEvaluatorUsage(t *testing.T) {
 				},
 			},
 			usage: corev1.ResourceList{
-				corev1.ResourceRequestsCPU:                         resource.MustParse("4"),
-				corev1.ResourceRequestsMemory:                      resource.MustParse("100M"),
-				corev1.ResourceLimitsCPU:                           resource.MustParse("8"),
-				corev1.ResourceLimitsMemory:                        resource.MustParse("200M"),
-				corev1.ResourcePods:                                resource.MustParse("1"),
-				corev1.ResourceCPU:                                 resource.MustParse("4"),
-				corev1.ResourceMemory:                              resource.MustParse("100M"),
-				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix): resource.MustParse("11"),
-				corev1.ResourceName("requests.example.com/dongle"): resource.MustParse("4"),
+				corev1.ResourceRequestsCPU:    resource.MustParse("4"),
+				corev1.ResourceRequestsMemory: resource.MustParse("100M"),
+				corev1.ResourceLimitsCPU:      resource.MustParse("8"),
+				corev1.ResourceLimitsMemory:   resource.MustParse("200M"),
+				corev1.ResourcePods:           resource.MustParse("1"),
+				corev1.ResourceCPU:            resource.MustParse("4"),
+				corev1.ResourceMemory:         resource.MustParse("100M"),
+				maskResourceWithPrefix(VGpuPrefix, corev1.DefaultResourceRequestsPrefix):        resource.MustParse("11"),
+				corev1.ResourceName("requests.example.com/dongle"):                              resource.MustParse("4"),
 				generic.ObjectCountQuotaResourceNameFor(schema.GroupResource{Resource: "pods"}): resource.MustParse("1"),
 			},
 		},

@@ -253,74 +253,72 @@ func TestPatchPodStatus(t *testing.T) {
 	}
 }
 
-func fakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool, ) *v1.Pod {
+func fakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool) *v1.Pod {
 	pod := &v1.Pod{}
 	pod.Labels = make(map[string]string)
 	pod.Annotations = make(map[string]string)
 
-	startTime := now.Add(-1 * time.Duration(relativeStartMinute * 60) * time.Second)
-	stopTime := now.Add(-1 * time.Duration(relativeStopMinute * 60) * time.Second)
+	startTime := now.Add(-1 * time.Duration(relativeStartMinute*60) * time.Second)
+	stopTime := now.Add(-1 * time.Duration(relativeStopMinute*60) * time.Second)
 
-	if !knockoffStartTime{
-		pod.Labels["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
-		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
+	if !knockoffStartTime {
+		pod.Labels["cron_start"] = fmt.Sprintf("%d %d * * *", startTime.Minute(), startTime.Hour())
+		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *", startTime.Minute(), startTime.Hour())
 	}
-	if !knockoffStopTime{
-		pod.Labels["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
-		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
+	if !knockoffStopTime {
+		pod.Labels["cron_end"] = fmt.Sprintf("%d %d * * *", stopTime.Minute(), stopTime.Hour())
+		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *", stopTime.Minute(), stopTime.Hour())
 	}
 	return pod
 }
 
-
 func TestIsCrobJobPodRunNotInConfigTimeSlot(t *testing.T) {
 	now := time.Now()
 
-
 	tests := []struct {
-		pod             *v1.Pod
-		expected        bool
+		pod      *v1.Pod
+		expected bool
 	}{
 		{
-			pod:             fakeCronJobPod(now, 125, 65, false, false ),
-			expected:        true,
+			pod:      fakeCronJobPod(now, 125, 65, false, false),
+			expected: true,
 		},
 		{
-			pod:             fakeCronJobPod(now, -61, -121,false, false),
-			expected:        true,
+			pod:      fakeCronJobPod(now, -61, -121, false, false),
+			expected: true,
 		},
 		{
-			pod:             fakeCronJobPod(now, 10, 0,false, false),
-			expected:        true,
+			pod:      fakeCronJobPod(now, 10, 0, false, false),
+			expected: true,
 		},
 		{
-			pod:             fakeCronJobPod(now, 0, -10,false, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 0, -10, false, false),
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 10, -50, false, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 10, -50, false, false),
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 1, 60,false, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 1, 60, false, false),
+			expected: false,
 		},
 		{
-			pod:             &v1.Pod{},
-			expected:        false,
+			pod:      &v1.Pod{},
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 125, 65,true, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 125, 65, true, false),
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 125, -65,false, true),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 125, -65, false, true),
+			expected: false,
 		},
 	}
 
 	for i, test := range tests {
-		isAvailable,_:= IsCrobJobPodRunNotInConfigTimeSlot(test.pod)
+		isAvailable, _ := IsCrobJobPodRunNotInConfigTimeSlot(test.pod)
 		if isAvailable != test.expected {
 			t.Errorf("[tc #%d] expected available pod: %t, got: %t", i, test.expected, isAvailable)
 		}

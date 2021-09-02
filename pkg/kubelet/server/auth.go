@@ -101,6 +101,8 @@ func (n nodeAuthorizerAttributesGetter) GetRequestAttributes(u user.Info, r *htt
 		attrs.Subresource = "stats"
 	case isSubpath(requestPath, metricsPath):
 		attrs.Subresource = "metrics"
+	case isSubpath(requestPath, metricsResetPath):
+		attrs.Subresource = "metrics"
 	case isSubpath(requestPath, logsPath):
 		// "log" to match other log subresources (pods/log, etc)
 		attrs.Subresource = "log"

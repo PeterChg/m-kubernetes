@@ -131,6 +131,8 @@ func TestRunOnce(t *testing.T) {
 	kb.evictionManager = evictionManager
 	kb.admitHandlers.AddPodAdmitHandler(evictionAdmitHandler)
 	kb.mounter = mount.NewFakeMounter(nil)
+	kb.maxPodsToRemoveAtOnce = 10
+
 	if err := kb.setupDataDirs(); err != nil {
 		t.Errorf("Failed to init data dirs: %v", err)
 	}

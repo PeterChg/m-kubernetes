@@ -367,6 +367,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 	keepTerminatedPodVolumes bool,
 	nodeLabels map[string]string,
 	seccompProfileRoot string,
+	maxPodsToRemoveAtOnce int32,
 	nodeStatusMaxImages int32) (*Kubelet, error) {
 	if rootDirectory == "" {
 		return nil, fmt.Errorf("invalid root directory %q", rootDirectory)
@@ -541,6 +542,7 @@ func NewMainKubelet(kubeCfg *kubeletconfiginternal.KubeletConfiguration,
 		keepTerminatedPodVolumes:                keepTerminatedPodVolumes,
 		nodeStatusMaxImages:                     nodeStatusMaxImages,
 		lastContainerStartedTime:                newTimeCache(),
+		maxPodsToRemoveAtOnce:                   maxPodsToRemoveAtOnce,
 	}
 
 	if klet.cloud != nil {
@@ -1178,6 +1180,9 @@ type Kubelet struct {
 
 	// Handles node shutdown events for the Node.
 	shutdownManager *nodeshutdown.Manager
+
+	// Max pod number avoid to remove at once, this is used by circuit-breaker when disrupation occurred
+	maxPodsToRemoveAtOnce int32
 }
 
 // ListPodStats is delegated to StatsProvider, which implements stats.Provider interface
@@ -2129,6 +2134,27 @@ func (kl *Kubelet) HandlePodUpdates(pods []*v1.Pod) {
 // being removed from a config source.
 func (kl *Kubelet) HandlePodRemoves(pods []*v1.Pod) {
 	start := kl.clock.Now()
+
+	podWithoutDeleteTimestampCount := 0
+	for _, pod := range pods {
+		if pod.DeletionTimestamp == nil {
+			podWithoutDeleteTimestampCount++
+		}
+	}
+
+	// if there are cluster-level disruption, such as apiserver is misconfigured and misconnected to an wrong ETCD,
+	// the apiserver would like to send wrong control command and delete all pods belonging to this node.
+	// As last defense of running pod, kubelet should have some sanity check to avoid execute a wrong command.
+	// So when kubelet wants to remove a lots of pods which do not have deleteTimestamp assigned,
+	// we should stop the process, trigger the circuit breaker mechanism, and alert the maintainer to check
+	// what happened
+	if kl.maxPodsToRemoveAtOnce > 0 && podWithoutDeleteTimestampCount > int(kl.maxPodsToRemoveAtOnce) {
+		metrics.RemoveTooManyPodAtOnce.Inc()
+		klog.Errorf("Circuit breaker has been triggered to avoid remove more than %d pods at once, "+
+			"list of pods wanted to be removed: %s", kl.maxPodsToRemoveAtOnce, format.Pods(pods))
+		return
+	}
+
 	for _, pod := range pods {
 		kl.podManager.DeletePod(pod)
 		if kubetypes.IsMirrorPod(pod) {

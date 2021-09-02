@@ -73,6 +73,7 @@ import (
 	"k8s.io/kubernetes/pkg/kubelet/cri/streaming"
 	"k8s.io/kubernetes/pkg/kubelet/cri/streaming/portforward"
 	remotecommandserver "k8s.io/kubernetes/pkg/kubelet/cri/streaming/remotecommand"
+	kubeletmetrics "k8s.io/kubernetes/pkg/kubelet/metrics"
 	"k8s.io/kubernetes/pkg/kubelet/prober"
 	servermetrics "k8s.io/kubernetes/pkg/kubelet/server/metrics"
 	"k8s.io/kubernetes/pkg/kubelet/server/stats"
@@ -82,6 +83,7 @@ import (
 
 const (
 	metricsPath         = "/metrics"
+	metricsResetPath    = "/metrics-reset"
 	cadvisorMetricsPath = "/metrics/cadvisor"
 	resourceMetricsPath = "/metrics/resource"
 	proberMetricsPath   = "/metrics/probes"
@@ -351,6 +353,8 @@ func (s *Server) InstallDefaultHandlers() {
 	//lint:ignore SA1019 https://github.com/kubernetes/enhancements/issues/1206
 	s.restfulCont.Handle(metricsPath, legacyregistry.Handler())
 
+	s.restfulCont.Handle(metricsResetPath, handleResetMetrics())
+
 	// cAdvisor metrics are exposed under the secured handler as well
 	r := compbasemetrics.NewKubeRegistry()
 
@@ -398,6 +402,16 @@ func (s *Server) InstallDefaultHandlers() {
 	s.restfulCont.Handle(proberMetricsPath,
 		compbasemetrics.HandlerFor(p, compbasemetrics.HandlerOpts{ErrorHandling: compbasemetrics.ContinueOnError}),
 	)
+}
+
+// we can reset metrics here, which mainly used when a disruption occurred, the metrics trigger the alerter, but
+// the system can not recover automatically, the maintainer must involved in to have some check to make sure the system is
+// recovered from disruption and running normally then we reset the metrics to indicate that condition.
+func handleResetMetrics() http.Handler {
+	return http.HandlerFunc(func(resp http.ResponseWriter, req *http.Request) {
+		kubeletmetrics.RemoveTooManyPodAtOnce.Set(0)
+		fmt.Fprint(resp, "success")
+	})
 }
 
 // InstallDebuggingHandlers registers the HTTP request patterns that serve logs or run commands/containers

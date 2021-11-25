@@ -120,6 +120,8 @@ type Runtime interface {
 	// This method just proxies a new runtimeConfig with the updated
 	// CIDR value down to the runtime shim.
 	UpdatePodCIDR(podCIDR string) error
+	//UpdatePodContainersConfig update pod's container resource config
+	UpdatePodContainersConfig(pod *v1.Pod, podStatus *PodStatus) PodSyncResult
 }
 
 // StreamingRuntime is the interface implemented by runtimes that handle the serving of the

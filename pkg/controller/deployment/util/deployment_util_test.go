@@ -18,6 +18,7 @@ package util
 
 import (
 	"fmt"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"math"
 	"math/rand"
 	"reflect"
@@ -135,6 +136,7 @@ func generateRS(deployment apps.Deployment) apps.ReplicaSet {
 			Name:            names.SimpleNameGenerator.GenerateName("replicaset"),
 			Labels:          template.Labels,
 			OwnerReferences: []metav1.OwnerReference{*newDControllerRef(&deployment)},
+			Annotations:     make(map[string]string),
 		},
 		Spec: apps.ReplicaSetSpec{
 			Replicas: new(int32),
@@ -336,6 +338,24 @@ func generatePodTemplateSpec(name, nodeName string, annotations, labels map[stri
 	}
 }
 
+func addContainerToPodTemplateSpec(name, nodeName string, annotations, labels map[string]string, containers ...v1.Container) v1.PodTemplateSpec {
+	spec := v1.PodTemplateSpec{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        name,
+			Annotations: annotations,
+			Labels:      labels,
+		},
+		Spec: v1.PodSpec{
+			NodeName: nodeName,
+		},
+	}
+
+	for _, container := range containers {
+		spec.Spec.Containers = append(spec.Spec.Containers, container)
+	}
+	return spec
+}
+
 func TestEqualIgnoreHash(t *testing.T) {
 	tests := []struct {
 		Name           string
@@ -469,6 +489,319 @@ func TestFindNewReplicaSet(t *testing.T) {
 			Name:       "Get nil new ReplicaSet",
 			deployment: deployment,
 			rsList:     []*apps.ReplicaSet{&oldRS},
+			expected:   nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			if rs := FindNewReplicaSet(&test.deployment, test.rsList); !reflect.DeepEqual(rs, test.expected) {
+				t.Errorf("In test case %q, expected %#v, got %#v", test.Name, test.expected, rs)
+			}
+		})
+	}
+}
+
+func TestEqualIgnoreHashAndResourceLimit(t *testing.T) {
+	tests := []struct {
+		Name           string
+		former, latter v1.PodTemplateSpec
+		expected       bool
+	}{
+		{
+			"Different container resource limit  config, but same resource request config",
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{"UpdateInplace": ""}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1", "something": "else"},
+				v1.Container{
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+					},
+				}),
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{"UpdateInplace": ""}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-2", "something": "else"},
+				v1.Container{
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+					},
+				}),
+			true,
+		},
+		{
+			"Different container resource limit and request config",
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1", "something": "else"},
+				v1.Container{
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+					},
+				}),
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1", "something": "else"},
+				v1.Container{
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+					},
+				}),
+			false,
+		},
+		{
+			"Different container resource limit config, one container turn up limit , other turn down ",
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1"},
+				v1.Container{
+					Name: "container1",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				},
+				v1.Container{
+					Name: "container2",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				}),
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1"},
+				v1.Container{
+					Name: "container1",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				},
+				v1.Container{
+					Name: "container2",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				}),
+			true,
+		},
+		{
+			"Different container resource limit config, one container turn up limit , other turn down ",
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1"},
+				v1.Container{
+					Name: "container1",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				},
+				v1.Container{
+					Name: "container2",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				}),
+			addContainerToPodTemplateSpec("foo", "foo-node", map[string]string{}, map[string]string{apps.DefaultDeploymentUniqueLabelKey: "value-1"},
+				v1.Container{
+					Name: "container1",
+					Resources: v1.ResourceRequirements{
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				},
+				v1.Container{
+					Name: "container2",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+						},
+					},
+				}),
+			true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.Name, func(t *testing.T) {
+			runTest := func(t1, t2 *v1.PodTemplateSpec, reversed bool) {
+				reverseString := ""
+				if reversed {
+					reverseString = " (reverse order)"
+				}
+				// Run
+				equal := EqualIgnoreHashAndResourceLimit(t1, t2)
+				if equal != test.expected {
+					t.Errorf("%q%s: expected %v", test.Name, reverseString, test.expected)
+					return
+				}
+				if t1.Labels == nil || t2.Labels == nil {
+					t.Errorf("%q%s: unexpected labels becomes nil", test.Name, reverseString)
+				}
+			}
+
+			runTest(&test.former, &test.latter, false)
+			// Test the same case in reverse order
+			runTest(&test.latter, &test.former, true)
+		})
+	}
+}
+
+func TestFindNewReplicaSetForUpdateInplace(t *testing.T) {
+	now := metav1.Now()
+	later := metav1.Time{Time: now.Add(time.Minute)}
+
+	updateInplaceDeployment := generateDeployment("UpdateInplace")
+	updateInplaceDeployment.Annotations["UpdateInplace"] = "true"
+	updateInplaceDeployment.Annotations["deployment.kubernetes.io/revision"] = "1"
+	updateInplaceDeployment.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+
+	updateInplaceRs1 := generateRS(updateInplaceDeployment)
+	updateInplaceRs1.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(3), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	updateInplaceRs1.CreationTimestamp = now
+	updateInplaceRs1.Annotations["deployment.kubernetes.io/revision"] = "1"
+
+	updateInplaceRs2 := generateRS(updateInplaceDeployment)
+	updateInplaceRs2.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(4), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	updateInplaceRs2.CreationTimestamp = later
+	updateInplaceRs2.Annotations["deployment.kubernetes.io/revision"] = "1"
+
+	updateInplaceRs3 := generateRS(updateInplaceDeployment)
+	updateInplaceRs3.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(4), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	updateInplaceRs3.CreationTimestamp = later
+	updateInplaceRs3.Annotations["deployment.kubernetes.io/revision"] = "2"
+
+	notUpdateInplaceDeployment := generateDeployment("UpdateInplace")
+	notUpdateInplaceDeployment.Annotations["deployment.kubernetes.io/revision"] = "1"
+	notUpdateInplaceDeployment.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(100), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(1), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+
+	tests := []struct {
+		Name       string
+		deployment apps.Deployment
+		rsList     []*apps.ReplicaSet
+		expected   *apps.ReplicaSet
+	}{
+		{
+			Name:       "Get new ReplicaSet with the same template as Deployment spec but different revison value",
+			deployment: updateInplaceDeployment,
+			rsList:     []*apps.ReplicaSet{&updateInplaceRs1, &updateInplaceRs2, &updateInplaceRs3},
+			expected:   &updateInplaceRs1,
+		},
+		{
+			Name:       "Get the oldest new ReplicaSet when there are more than one ReplicaSet with the same template",
+			deployment: updateInplaceDeployment,
+			rsList:     []*apps.ReplicaSet{&updateInplaceRs1, &updateInplaceRs2},
+			expected:   &updateInplaceRs1,
+		},
+		{
+			Name:       "Get nil new ReplicaSet",
+			deployment: notUpdateInplaceDeployment,
+			rsList:     []*apps.ReplicaSet{&updateInplaceRs1, &updateInplaceRs2, &updateInplaceRs3},
 			expected:   nil,
 		},
 	}

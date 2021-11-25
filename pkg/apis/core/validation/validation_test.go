@@ -9694,6 +9694,251 @@ func TestValidatePodUpdate(t *testing.T) {
 			"spec: Forbidden: pod updates",
 			"removed priority class name",
 		},
+		{
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo1111"},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V1",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo1111"},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			"spec: Forbidden: pod updates may not change fields",
+			"change container resource limit when QOS is guaranteed",
+		},
+		{
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo2222"},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V1",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo2222"},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources:                core.ResourceRequirements{},
+						},
+					},
+				},
+			},
+			"spec: Forbidden: pod updates may not change fields",
+			"change container resource limit when QOS is best-effort",
+		},
+		{
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo3333", Annotations: map[string]string{"UpdateInplace": ""}},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V1",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+						{
+							Name:                     "foo2",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo3333"},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(400), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						}, {
+							Name:                     "foo2",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			"",
+			"change container resource limit when QOS is burst",
+		},
+		{
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo3333", Annotations: map[string]string{"UpdateInplace": ""}},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V1",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(400), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+						{
+							Name:                     "foo2",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(400), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			core.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "foo3333"},
+				Spec: core.PodSpec{
+					Containers: []core.Container{
+						{
+							Name:                     "foo1",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(3), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(500), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						}, {
+							Name:                     "foo2",
+							Image:                    "foo:V2",
+							TerminationMessagePolicy: "File",
+							ImagePullPolicy:          "Always",
+							Resources: core.ResourceRequirements{
+								Limits: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(400), resource.DecimalSI),
+								},
+								Requests: core.ResourceList{
+									"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+									"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+								},
+							},
+						},
+					},
+				},
+			},
+			"",
+			"change container resource limit when QOS is burst",
+		},
 	}
 
 	for _, test := range tests {

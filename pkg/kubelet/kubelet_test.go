@@ -1427,6 +1427,43 @@ func TestNetworkErrorsWithoutHostNetwork(t *testing.T) {
 	assert.NoError(t, err, "expected pod with hostNetwork=true to succeed when network in error")
 }
 
+func TesPodUpdateInplace(t *testing.T) {
+	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
+	defer testKubelet.Cleanup()
+
+	kl := testKubelet.kubelet
+	pod := podWithUIDNameNsSpec("12345678", "foo", "ns", v1.PodSpec{
+		Containers: []v1.Container{
+			{Name: "1234", Image: "foo",
+				Resources: v1.ResourceRequirements{
+					Limits: v1.ResourceList{
+						"cpu": *resource.NewQuantity(int64(2), resource.DecimalSI),
+					},
+					Requests: v1.ResourceList{
+						"cpu": *resource.NewQuantity(int64(2), resource.DecimalSI),
+					},
+				},
+			},
+		},
+	})
+
+	pod.Annotations["UpdateInplace"] = "up"
+
+	pods := []*v1.Pod{pod}
+	kl.podManager.SetPods(pods)
+	err := kl.syncPod(syncPodOptions{
+		pod:        pod,
+		podStatus:  &kubecontainer.PodStatus{},
+		updateType: kubetypes.SyncPodUpdate,
+	})
+	assert.NoError(t, err)
+	need := kl.needResizePodResourceLimit(pod)
+
+	if need {
+		t.Errorf("expected not need resize pod limit, got %t", need)
+	}
+}
+
 func TestFilterOutTerminatedPods(t *testing.T) {
 	testKubelet := newTestKubelet(t, false /* controllerAttachDetachEnabled */)
 	defer testKubelet.Cleanup()

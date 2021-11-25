@@ -71,7 +71,7 @@ func (c *ReasonCache) add(uid types.UID, name string, reason error, message stri
 // StartContainer action will change the cache.
 func (c *ReasonCache) Update(uid types.UID, result kubecontainer.PodSyncResult) {
 	for _, r := range result.SyncResults {
-		if r.Action != kubecontainer.StartContainer {
+		if r.Action != kubecontainer.StartContainer && r.Action != kubecontainer.UpdateContainer {
 			continue
 		}
 		name := r.Target.(string)

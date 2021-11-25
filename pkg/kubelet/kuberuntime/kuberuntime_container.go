@@ -60,6 +60,8 @@ var (
 	ErrPreCreateHook = errors.New("PreCreateHookError")
 	// ErrCreateContainer - failed to create container
 	ErrCreateContainer = errors.New("CreateContainerError")
+	// ErrUpdateContainer - failed to updatre container
+	ErrUpdateContainer = errors.New("UpdateContainerError")
 	// ErrPreStartHook - failed to execute PreStartHook
 	ErrPreStartHook = errors.New("PreStartHookError")
 	// ErrPostStartHook - failed to execute PostStartHook
@@ -235,6 +237,19 @@ func (m *kubeGenericRuntimeManager) startContainer(podSandboxID string, podSandb
 		}
 	}
 
+	return "", nil
+}
+
+//updateContainer update container config
+func (m *kubeGenericRuntimeManager) updateContainer(container *v1.Container, containerID string, pod *v1.Pod) (string, error) {
+
+	cr := m.generateLinuxContainerResourceConfig(container, pod)
+
+	if err := m.runtimeService.UpdateContainerResources(containerID, cr); err != nil {
+		s, _ := grpcstatus.FromError(err)
+		m.recordContainerEvent(pod, container, containerID, v1.EventTypeWarning, events.FailedToUpdateContainer, "Error: %v", s.Message())
+		return s.Message(), ErrUpdateContainer
+	}
 	return "", nil
 }
 

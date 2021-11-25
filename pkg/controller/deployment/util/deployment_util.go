@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"fmt"
+	v1qos "k8s.io/kubernetes/pkg/apis/core/v1/helper/qos"
 	"math"
 	"sort"
 	"strconv"
@@ -98,6 +99,9 @@ const (
 	// MinimumReplicasUnavailable is added in a deployment when it doesn't have the minimum required replicas
 	// available.
 	MinimumReplicasUnavailable = "MinimumReplicasUnavailable"
+
+	//check deployment whether support update container resource limit inplace
+	UpdateResourceLimitInplace = "UpdateInplace"
 )
 
 // NewDeploymentCondition creates a new deployment condition.
@@ -298,6 +302,7 @@ var annotationsToSkip = map[string]bool{
 	DesiredReplicasAnnotation:      true,
 	MaxReplicasAnnotation:          true,
 	apps.DeprecatedRollbackTo:      true,
+	UpdateResourceLimitInplace:     true,
 }
 
 // skipCopyAnnotation returns true if we should skip copying the annotation with the given annotation key
@@ -627,6 +632,54 @@ func ListPods(deployment *apps.Deployment, rsList []*apps.ReplicaSet, getPodList
 	return owned, nil
 }
 
+//TemplateEqualIgnoreLimitChange returns true if two given podTemplateSpec are not equal, but not need create new RS
+func TemplateIgnoreResourceLimitChange(template1, template2 *v1.PodTemplateSpec) {
+	var sameCount = 0
+	var template1ContainersCount = len(template1.Spec.Containers)
+	var template2ContainersCount = len(template2.Spec.Containers)
+
+	//need to check whether the number of container or Qos type Of pod have changed
+	if v1.PodQOSBurstable != v1qos.GetPodQOS(&v1.Pod{Spec: template1.Spec}) ||
+		v1.PodQOSBurstable != v1qos.GetPodQOS(&v1.Pod{Spec: template2.Spec}) {
+		return
+	}
+
+	for _, container1 := range template1.Spec.Containers {
+		for _, container2 := range template2.Spec.Containers {
+			if container1.Name == container2.Name {
+				sameCount++
+				break
+			}
+		}
+	}
+
+	if sameCount == template1ContainersCount && sameCount == template2ContainersCount {
+		for _, container1 := range template1.Spec.Containers {
+			for _, container2 := range template2.Spec.Containers {
+				if container1.Name == container2.Name {
+					delete(container1.Resources.Limits, v1.ResourceCPU)
+					delete(container2.Resources.Limits, v1.ResourceCPU)
+
+					delete(container1.Resources.Limits, v1.ResourceMemory)
+					delete(container2.Resources.Limits, v1.ResourceMemory)
+					break
+				}
+			}
+		}
+	}
+}
+
+//TemplateHasLimitChange returns true if two given podTemplateSpec are not equal but only containers Limit has changed
+func TemplateOnlyExistResourceLimitDiff(d *apps.Deployment, rs *apps.ReplicaSet) bool {
+	template1 := &d.Spec.Template
+	template2 := &rs.Spec.Template
+
+	if !canUpdateResourceLimitInplace(d) {
+		return false
+	}
+	return EqualIgnoreHashAndResourceLimit(template1, template2)
+}
+
 // EqualIgnoreHash returns true if two given podTemplateSpec are equal, ignoring the diff in value of Labels[pod-template-hash]
 // We ignore pod-template-hash because:
 // 1. The hash result would be different upon podTemplateSpec API changes
@@ -635,15 +688,58 @@ func ListPods(deployment *apps.Deployment, rsList []*apps.ReplicaSet, getPodList
 func EqualIgnoreHash(template1, template2 *v1.PodTemplateSpec) bool {
 	t1Copy := template1.DeepCopy()
 	t2Copy := template2.DeepCopy()
+
 	// Remove hash labels from template.Labels before comparing
 	delete(t1Copy.Labels, apps.DefaultDeploymentUniqueLabelKey)
 	delete(t2Copy.Labels, apps.DefaultDeploymentUniqueLabelKey)
+
+	return apiequality.Semantic.DeepEqual(t1Copy, t2Copy)
+}
+
+// EqualIgnoreHashAndResourceLimit returns true if two given podTemplateSpec are equal,
+//  ignoring the diff in value of Labels[pod-template-hash] , and also ignoring resource limit config in the rs 、deployment templateSpec
+//  We ignore pod-template-hash because:
+// 1. The hash result would be different upon podTemplateSpec API changes
+//    (e.g. the addition of a new field will cause the hash code to change)
+// 2. The deployment template won't have hash labels
+func EqualIgnoreHashAndResourceLimit(template1, template2 *v1.PodTemplateSpec) bool {
+	t1Copy := template1.DeepCopy()
+	t2Copy := template2.DeepCopy()
+
+	TemplateIgnoreResourceLimitChange(t1Copy, t2Copy)
+	// Remove hash labels from template.Labels before comparing
+	delete(t1Copy.Labels, apps.DefaultDeploymentUniqueLabelKey)
+	delete(t2Copy.Labels, apps.DefaultDeploymentUniqueLabelKey)
+	delete(t1Copy.Annotations, UpdateResourceLimitInplace)
+	delete(t2Copy.Annotations, UpdateResourceLimitInplace)
 	return apiequality.Semantic.DeepEqual(t1Copy, t2Copy)
 }
 
 // FindNewReplicaSet returns the new RS this given deployment targets (the one with the same pod template).
 func FindNewReplicaSet(deployment *apps.Deployment, rsList []*apps.ReplicaSet) *apps.ReplicaSet {
 	sort.Sort(controller.ReplicaSetsByCreationTimestamp(rsList))
+
+	if canUpdateResourceLimitInplace(deployment) {
+		var filteredRs *apps.ReplicaSet = nil
+
+		for i := range rsList {
+			if EqualIgnoreHashAndResourceLimit(&rsList[i].Spec.Template, &deployment.Spec.Template) {
+				// In rare cases, such as after cluster upgrades, Deployment may end up with
+				// having more than one new ReplicaSets that have the same template as its template,
+				// see https://github.com/kubernetes/kubernetes/issues/40415
+				// We deterministically choose the oldest new ReplicaSet.
+				if filteredRs == nil {
+					filteredRs = rsList[i]
+				}
+
+				if deployment.Annotations[RevisionAnnotation] == rsList[i].Annotations[RevisionAnnotation] {
+					return rsList[i]
+				}
+			}
+		}
+		return filteredRs
+	}
+
 	for i := range rsList {
 		if EqualIgnoreHash(&rsList[i].Spec.Template, &deployment.Spec.Template) {
 			// In rare cases, such as after cluster upgrades, Deployment may end up with
@@ -948,6 +1044,11 @@ func GetDeploymentsForReplicaSet(deploymentLister appslisters.DeploymentLister, 
 	}
 
 	return deployments, nil
+}
+
+func canUpdateResourceLimitInplace(d *apps.Deployment) bool {
+	_, ok := d.Annotations[UpdateResourceLimitInplace]
+	return ok
 }
 
 // ReplicaSetsByRevision sorts a list of ReplicaSet by revision, using their creation timestamp or name as a tie breaker.

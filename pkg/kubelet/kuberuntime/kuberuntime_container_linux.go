@@ -92,6 +92,57 @@ func (m *kubeGenericRuntimeManager) generateLinuxContainerConfig(container *v1.C
 	return lc
 }
 
+func (m *kubeGenericRuntimeManager) generateLinuxContainerResourceConfig(container *v1.Container, pod *v1.Pod) *runtimeapi.LinuxContainerResources {
+	lcs := &runtimeapi.LinuxContainerResources{}
+
+	// set linux container resources
+	var cpuShares int64
+	cpuRequest := container.Resources.Requests.Cpu()
+	cpuLimit := container.Resources.Limits.Cpu()
+	memoryLimit := container.Resources.Limits.Memory().Value()
+	oomScoreAdj := int64(qos.GetContainerOOMScoreAdjust(pod, container,
+		int64(m.machineInfo.MemoryCapacity)))
+	// If request is not specified, but limit is, we want request to default to limit.
+	// API server does this for new containers, but we repeat this logic in Kubelet
+	// for containers running on existing Kubernetes clusters.
+	if cpuRequest.IsZero() && !cpuLimit.IsZero() {
+		cpuShares = milliCPUToShares(cpuLimit.MilliValue())
+	} else {
+		// if cpuRequest.Amount is nil, then milliCPUToShares will return the minimal number
+		// of CPU shares.
+		cpuShares = milliCPUToShares(cpuRequest.MilliValue())
+	}
+	lcs.CpuShares = cpuShares
+	if memoryLimit != 0 {
+		lcs.MemoryLimitInBytes = memoryLimit
+	} else {
+		lcs.MemoryLimitInBytes = int64(-1)
+	}
+	// Set OOM score of the container based on qos policy. Processes in lower-priority pods should
+	// be killed first if the system runs out of memory.
+	lcs.OomScoreAdj = oomScoreAdj
+
+	if m.cpuCFSQuota {
+		// if cpuLimit.Amount is nil, then the appropriate default value is returned
+		// to allow full usage of cpu resource.
+		cpuPeriod := int64(quotaPeriod)
+		cpuQuota := int64(-1)
+
+		if utilfeature.DefaultFeatureGate.Enabled(kubefeatures.CPUCFSQuotaPeriod) {
+			cpuPeriod = int64(m.cpuCFSQuotaPeriod.Duration / time.Microsecond)
+		}
+		if cpuLimit.MilliValue() != 0 {
+			cpuQuota = milliCPUToQuota(cpuLimit.MilliValue(), cpuPeriod)
+		}
+		lcs.CpuQuota = cpuQuota
+		lcs.CpuPeriod = cpuPeriod
+	}
+
+	lcs.HugepageLimits = GetHugepageLimitsFromResources(container.Resources)
+
+	return lcs
+}
+
 // GetHugepageLimitsFromResources returns limits of each hugepages from resources.
 func GetHugepageLimitsFromResources(resources v1.ResourceRequirements) []*runtimeapi.HugepageLimit {
 	var hugepageLimits []*runtimeapi.HugepageLimit

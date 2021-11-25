@@ -104,3 +104,10 @@ func (m *FakePodContainerManager) IsPodCgroup(cgroupfs string) (bool, types.UID)
 	m.CalledFunctions = append(m.CalledFunctions, "IsPodCgroup")
 	return false, types.UID("")
 }
+
+func (m *FakePodContainerManager) Update(pod *v1.Pod) error {
+	m.Lock()
+	defer m.Unlock()
+	m.CalledFunctions = append(m.CalledFunctions, "Update")
+	return nil
+}

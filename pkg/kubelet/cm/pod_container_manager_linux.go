@@ -285,6 +285,51 @@ func (m *podContainerManagerImpl) GetAllPodsFromCgroups() (map[types.UID]CgroupN
 	return foundPods, nil
 }
 
+// Update update pod cgroup config
+func (m *podContainerManagerImpl) Update(pod *v1.Pod) error {
+	podContainerName, _ := m.GetPodContainerName(pod)
+
+	// Create the pod container
+	containerConfig := &CgroupConfig{
+		Name:               podContainerName,
+		ResourceParameters: ResourceConfigForPod(pod, m.enforceCPULimits, m.cpuCFSQuotaPeriod),
+	}
+
+	// track if limits were applied for each resource.
+	memoryLimitsDeclared := true
+	cpuLimitsDeclared := true
+
+	for _, container := range pod.Spec.Containers {
+		if container.Resources.Limits.Cpu().IsZero() {
+			cpuLimitsDeclared = false
+		}
+		if container.Resources.Limits.Memory().IsZero() {
+			memoryLimitsDeclared = false
+		}
+	}
+	// determine the qos class
+	qosClass := v1qos.GetPodQOS(pod)
+	if qosClass == v1.PodQOSBurstable {
+		defaultConf := int64(-1)
+		if !cpuLimitsDeclared {
+			containerConfig.ResourceParameters.CpuQuota = &defaultConf
+		}
+		if !memoryLimitsDeclared {
+			containerConfig.ResourceParameters.Memory = &defaultConf
+		}
+	}
+
+	if m.podPidsLimit > 0 {
+		containerConfig.ResourceParameters.PidsLimit = &m.podPidsLimit
+	}
+
+	if err := m.cgroupManager.Update(containerConfig); err != nil {
+		klog.ErrorS(err, "failed to update container", "podContainerName", podContainerName)
+		return err
+	}
+	return nil
+}
+
 // podContainerManagerNoop implements podContainerManager interface.
 // It is a no-op implementation and basically does nothing
 // podContainerManagerNoop is used in case the QoS cgroup Hierarchy is not
@@ -328,4 +373,8 @@ func (m *podContainerManagerNoop) GetAllPodsFromCgroups() (map[types.UID]CgroupN
 
 func (m *podContainerManagerNoop) IsPodCgroup(cgroupfs string) (bool, types.UID) {
 	return false, types.UID("")
+}
+
+func (m *podContainerManagerNoop) Update(pod *v1.Pod) error {
+	return nil
 }

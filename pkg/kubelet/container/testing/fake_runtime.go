@@ -374,6 +374,19 @@ func (f *FakeRuntime) ImageStats() (*kubecontainer.ImageStats, error) {
 	return nil, f.Err
 }
 
+func (f *FakeRuntime) UpdatePodContainersConfig(pod *v1.Pod, podStatus *kubecontainer.PodStatus) (result kubecontainer.PodSyncResult) {
+	f.Lock()
+	defer f.Unlock()
+
+	f.CalledFunctions = append(f.CalledFunctions, "UpdatePodContainersConfig")
+
+	// TODO(random-liu): Add SyncResult for update containers
+	if f.Err != nil {
+		result.Fail(f.Err)
+	}
+	return
+}
+
 func (f *FakeStreamingRuntime) GetExec(id kubecontainer.ContainerID, cmd []string, stdin, stdout, stderr, tty bool) (*url.URL, error) {
 	f.Lock()
 	defer f.Unlock()

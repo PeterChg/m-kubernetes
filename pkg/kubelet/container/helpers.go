@@ -106,6 +106,21 @@ func HashContainer(container *v1.Container) uint64 {
 	return uint64(hash.Sum32())
 }
 
+// HashContainerWithOutResourceLimit returns the hash of the container without resource limit. It is used to compare
+// the running container with its desired spec in update resource limit scene.
+// Note: remember to update hashValues in container_hash_test.go as well.
+func HashContainerWithOutResourceLimit(container *v1.Container) uint64 {
+	template := container.DeepCopy()
+	hash := fnv.New32a()
+
+	template.Resources.Limits = nil
+	// Omit nil or empty field when calculating hash value
+	// Please see https://github.com/kubernetes/kubernetes/issues/53644
+	containerJSON, _ := json.Marshal(template)
+	hashutil.DeepHashObject(hash, containerJSON)
+	return uint64(hash.Sum32())
+}
+
 // envVarsToMap constructs a map of environment name to value from a slice
 // of env vars.
 func envVarsToMap(envs []EnvVar) map[string]string {

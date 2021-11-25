@@ -17,6 +17,7 @@ limitations under the License.
 package kuberuntime
 
 import (
+	"errors"
 	"path/filepath"
 	"reflect"
 	"sort"
@@ -962,6 +963,24 @@ func TestComputePodActions(t *testing.T) {
 				ContainersToStart: []int{1},
 			},
 		},
+		"container is set update inplace, Kill and recreate the container if the liveness check has failed": {
+			mutatePodFn: func(pod *v1.Pod) {
+				pod.Spec.RestartPolicy = v1.RestartPolicyAlways
+				pod.Annotations = make(map[string]string)
+				pod.Annotations["UpdateInplace"] = "up"
+			},
+			mutateStatusFn: func(status *kubecontainer.PodStatus) {
+				m.livenessManager.Set(status.ContainerStatuses[1].ID, proberesults.Failure, basePod)
+			},
+			actions: podActions{
+				SandboxID:         baseStatus.SandboxStatuses[0].Id,
+				ContainersToKill:  getKillMap(basePod, baseStatus, []int{1}),
+				ContainersToStart: []int{1},
+			},
+			resetStatusFn: func(status *kubecontainer.PodStatus) {
+				m.livenessManager.Remove(status.ContainerStatuses[1].ID)
+			},
+		},
 	} {
 		pod, status := makeBasePodAndStatus()
 		if test.mutatePodFn != nil {
@@ -1434,4 +1453,56 @@ func makeBasePodAndStatusWithInitAndEphemeralContainers() (*v1.Pod, *kubecontain
 		Hash: kubecontainer.HashContainer((*v1.Container)(&pod.Spec.EphemeralContainers[0].EphemeralContainerCommon)),
 	})
 	return pod, status
+}
+
+func TestUpdatePodContainersConfig(t *testing.T) {
+	fakeRuntime, fakeImage, m, err := createTestRuntimeManager()
+	assert.NoError(t, err)
+
+	containers := []v1.Container{
+		{
+			Name:            "foo1",
+			Image:           "busybox",
+			ImagePullPolicy: v1.PullIfNotPresent,
+		},
+		{
+			Name:            "foo2",
+			Image:           "alpine",
+			ImagePullPolicy: v1.PullIfNotPresent,
+		},
+	}
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "12345678",
+			Name:      "foo",
+			Namespace: "new",
+		},
+		Spec: v1.PodSpec{
+			Containers: containers,
+		},
+	}
+
+	backOff := flowcontrol.NewBackOff(time.Second, time.Minute)
+	result := m.SyncPod(pod, &kubecontainer.PodStatus{}, []v1.Secret{}, backOff)
+	assert.NoError(t, result.Error())
+
+	podStatus, err := m.GetPodStatus(pod.UID, pod.Name, pod.Namespace)
+	assert.NoError(t, err)
+	result = m.UpdatePodContainersConfig(pod, podStatus)
+	assert.NoError(t, result.Error())
+
+	assert.NoError(t, result.Error())
+	assert.Equal(t, 2, len(fakeRuntime.Containers))
+	assert.Equal(t, 2, len(fakeImage.Images))
+	assert.Equal(t, 1, len(fakeRuntime.Sandboxes))
+	for _, sandbox := range fakeRuntime.Sandboxes {
+		assert.Equal(t, runtimeapi.PodSandboxState_SANDBOX_READY, sandbox.State)
+	}
+	for _, c := range fakeRuntime.Containers {
+		assert.Equal(t, runtimeapi.ContainerState_CONTAINER_RUNNING, c.State)
+	}
+
+	fakeRuntime.InjectError("UpdateContainerResources", errors.New("UpdateContainerResources failed by setting"))
+	result = m.UpdatePodContainersConfig(pod, podStatus)
+	assert.Error(t, result.Error())
 }

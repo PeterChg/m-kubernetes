@@ -153,9 +153,20 @@ func (dc *DeploymentController) getNewReplicaSet(d *apps.Deployment, rsList, old
 		// Set existing new replica set's annotation
 		annotationsUpdated := deploymentutil.SetNewReplicaSetAnnotations(d, rsCopy, newRevision, true, maxRevHistoryLengthInChars)
 		minReadySecondsNeedsUpdate := rsCopy.Spec.MinReadySeconds != d.Spec.MinReadySeconds
-		if annotationsUpdated || minReadySecondsNeedsUpdate {
+		if minReadySecondsNeedsUpdate {
 			rsCopy.Spec.MinReadySeconds = d.Spec.MinReadySeconds
+		}
+
+		onlyResourceLimitUpdate := deploymentutil.TemplateOnlyExistResourceLimitDiff(d, rsCopy)
+		if (annotationsUpdated || minReadySecondsNeedsUpdate) && !onlyResourceLimitUpdate {
 			return dc.client.AppsV1().ReplicaSets(rsCopy.ObjectMeta.Namespace).Update(context.TODO(), rsCopy, metav1.UpdateOptions{})
+		}
+
+		if onlyResourceLimitUpdate {
+			rsCopy.Spec.Template.Spec = d.Spec.Template.Spec
+			if rs, err := dc.client.AppsV1().ReplicaSets(rsCopy.ObjectMeta.Namespace).Update(context.TODO(), rsCopy, metav1.UpdateOptions{}); err != nil {
+				return rs, err
+			}
 		}
 
 		// Should use the revision in existingNewRS's annotation, since it set by before

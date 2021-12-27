@@ -386,10 +386,14 @@ func (c *Configurator) getPredicateConfigs(predicateKeys sets.String) (map[strin
 	// First, identify the predicates that will run as actual fit predicates, and ones
 	// that will run as framework plugins.
 	for predicateKey := range allFitPredicates {
-		if _, exist := frameworkConfigProducers[predicateKey]; exist {
-			asPlugins.Insert(predicateKey)
-		} else {
+		if predicateKey == predicates.PodFitsResourcesPred || predicateKey == predicates.GeneralPred {
 			asFitPredicates[predicateKey] = allFitPredicates[predicateKey]
+		} else {
+			if _, exist := frameworkConfigProducers[predicateKey]; exist {
+				asPlugins.Insert(predicateKey)
+			} else {
+				asFitPredicates[predicateKey] = allFitPredicates[predicateKey]
+			}
 		}
 	}
 

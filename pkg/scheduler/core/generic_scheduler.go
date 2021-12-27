@@ -78,6 +78,11 @@ type FitError struct {
 	FilteredNodesStatuses framework.NodeToStatusMap
 }
 
+type DetailFitInfo struct {
+	FitInfo    map[string]int64
+	NotFitInfo map[string]int64
+}
+
 // ErrNoNodesAvailable is used to describe the error that no nodes available to schedule pods.
 var ErrNoNodesAvailable = fmt.Errorf("no nodes available to schedule pods")
 
@@ -89,6 +94,7 @@ const (
 // Error returns detailed information of why the pod failed to fit on each node
 func (f *FitError) Error() string {
 	reasons := make(map[string]int)
+	klog.V(6).Infof("rur here0. %v, %v", f.FailedPredicates, f.FilteredNodesStatuses)
 	for _, predicates := range f.FailedPredicates {
 		for _, pred := range predicates {
 			reasons[pred.GetReason()]++
@@ -108,7 +114,161 @@ func (f *FitError) Error() string {
 		return reasonStrings
 	}
 	reasonMsg := fmt.Sprintf(NoNodeAvailableMsg+": %v.", f.NumAllNodes, strings.Join(sortReasonsHistogram(), ", "))
-	return reasonMsg
+	if detailedErrMsg := f.detailInsufficientResourceErrorMsg(); detailedErrMsg != "" {
+		reasonMsg += " " + detailedErrMsg
+	}
+
+	return reasonMsg + "Detailed explanation-->https://cloud.d.xiaomi.net/product/docs/cloudml/sched"
+}
+
+//detailInsufficientResourceErrorMsg return detailed insufficient Resource error msg
+func (f *FitError) detailInsufficientResourceErrorMsg() string {
+
+	detailInfo := make(map[string]DetailFitInfo)
+	var resourceTypeCount = 2
+	for node, failedPres := range f.FailedPredicates {
+		dfi := DetailFitInfo{FitInfo: make(map[string]int64), NotFitInfo: make(map[string]int64)}
+		dfi.FitInfo[string(v1.ResourceCPU)] = 0
+		dfi.FitInfo[string(v1.ResourceMemory)] = 0
+
+		for _, pred := range failedPres {
+			if v, ok := pred.(*predicates.InsufficientResourceError); ok {
+				if v.GpuType != "" {
+					resourceTypeCount = 3
+					dfi.FitInfo["gpu"] = 0
+				}
+
+				if v.ResourceName == v1.ResourceCPU {
+					dfi.NotFitInfo[string(v1.ResourceCPU)] = v.GetFreeAmount()
+					delete(dfi.FitInfo, string(v1.ResourceCPU))
+				} else if v.ResourceName == v1.ResourceMemory {
+					dfi.NotFitInfo[string(v1.ResourceMemory)] = v.GetFreeAmount()
+					delete(dfi.FitInfo, string(v1.ResourceMemory))
+				} else if strings.HasPrefix(string(v.ResourceName), "cloudml.vgpu/") ||
+					strings.HasPrefix(string(v.ResourceName), "cloudml.gpu/") {
+					dfi.NotFitInfo["gpu"] = v.GetFreeAmount()
+					delete(dfi.FitInfo, "gpu")
+				}
+			}
+		}
+		detailInfo[node] = dfi
+	}
+	klog.V(6).Infof("detailed Insufficient Resource Error Msg %d, %v ", resourceTypeCount, detailInfo)
+	allNotFit := 0
+	cpuMemFit := make([]int64, 2)
+	cpuGpuFit := make([]int64, 2)
+	memGpuFit := make([]int64, 2)
+
+	//slice Fill in order: count, max free cpu, max free mem, max free gpu
+	onlyCpuFitRequestWithGpu := make([]int64, 3)
+	onlyMemFitRequestWithGpu := make([]int64, 3)
+	onlyGpuFitRequestWithGpu := make([]int64, 3)
+
+	//slice Fill in order: count, max free cpu, max free mem
+	onlyCpuFitRequestWithoutGpu := make([]int64, 2)
+	onlyMemFitRequestWithoutGpu := make([]int64, 2)
+
+	for _, v := range detailInfo {
+		if len(v.NotFitInfo) == resourceTypeCount {
+			allNotFit++
+		} else if len(v.NotFitInfo) == 2 && resourceTypeCount == 3 {
+			if _, ok := v.FitInfo[string(v1.ResourceCPU)]; ok {
+				onlyCpuFitRequestWithGpu[0]++
+				if v.NotFitInfo[string(v1.ResourceMemory)] >= onlyCpuFitRequestWithGpu[1] && v.NotFitInfo["gpu"] >= onlyCpuFitRequestWithGpu[2] {
+					onlyCpuFitRequestWithGpu[1] = v.NotFitInfo[string(v1.ResourceMemory)]
+					onlyCpuFitRequestWithGpu[2] = v.NotFitInfo["gpu"]
+				}
+			} else if _, ok := v.FitInfo[string(v1.ResourceMemory)]; ok {
+				onlyMemFitRequestWithGpu[0]++
+				if v.NotFitInfo[string(v1.ResourceCPU)] >= onlyMemFitRequestWithGpu[1] && v.NotFitInfo["gpu"] >= onlyMemFitRequestWithGpu[2] {
+					onlyMemFitRequestWithGpu[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					onlyMemFitRequestWithGpu[2] = v.NotFitInfo["gpu"]
+				}
+			} else if _, ok := v.FitInfo["gpu"]; ok {
+				onlyGpuFitRequestWithGpu[0]++
+				if v.NotFitInfo[string(v1.ResourceCPU)] >= onlyGpuFitRequestWithGpu[1] && v.NotFitInfo[string(v1.ResourceMemory)] >= onlyGpuFitRequestWithGpu[2] {
+					onlyGpuFitRequestWithGpu[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					onlyGpuFitRequestWithGpu[2] = v.NotFitInfo[string(v1.ResourceMemory)]
+				}
+			}
+		} else if len(v.NotFitInfo) == 1 {
+			if resourceTypeCount == 3 {
+				if _, ok := v.NotFitInfo[string(v1.ResourceCPU)]; ok {
+					memGpuFit[0]++
+					if v.NotFitInfo[string(v1.ResourceCPU)] > memGpuFit[1] {
+						memGpuFit[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					}
+				} else if _, ok := v.NotFitInfo[string(v1.ResourceMemory)]; ok {
+					cpuGpuFit[0]++
+					if v.NotFitInfo[string(v1.ResourceMemory)] > cpuGpuFit[1] {
+						cpuGpuFit[1] = v.NotFitInfo[string(v1.ResourceMemory)]
+					}
+				} else if _, ok := v.NotFitInfo["gpu"]; ok {
+					cpuMemFit[0]++
+					if v.NotFitInfo["gpu"] > cpuMemFit[1] {
+						cpuMemFit[1] = v.NotFitInfo["gpu"]
+					}
+				}
+			} else if resourceTypeCount == 2 {
+				if _, ok := v.FitInfo[string(v1.ResourceCPU)]; ok {
+					onlyCpuFitRequestWithoutGpu[0]++
+					if v.NotFitInfo[string(v1.ResourceMemory)] > onlyCpuFitRequestWithoutGpu[1] {
+						onlyCpuFitRequestWithoutGpu[1] = v.NotFitInfo[string(v1.ResourceMemory)]
+					}
+				} else if _, ok := v.FitInfo[string(v1.ResourceMemory)]; ok {
+					onlyMemFitRequestWithoutGpu[0]++
+					if v.NotFitInfo[string(v1.ResourceCPU)] > onlyMemFitRequestWithoutGpu[1] {
+						onlyMemFitRequestWithoutGpu[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					}
+				}
+			}
+		}
+	}
+	klog.V(5).Infof("resource fit info: %v, %v, %v, %v, %v, %v, %v, %v",  cpuMemFit, cpuGpuFit, memGpuFit, onlyCpuFitRequestWithGpu,
+		onlyMemFitRequestWithGpu, onlyGpuFitRequestWithGpu, onlyCpuFitRequestWithoutGpu, onlyMemFitRequestWithoutGpu)
+	errMsg := ""
+	if resourceTypeCount == 3 {
+		if allNotFit != 0 {
+			errMsg += fmt.Sprintf("GpuCpuMemAllNotFitNodes:%d. ", allNotFit)
+		}
+		if cpuGpuFit[0] != 0 {
+			errMsg += fmt.Sprintf("GpuCpuFitNodes:%d,maxMemFree:%dG. ", cpuGpuFit[0], cpuGpuFit[1]/1024/1024/1024)
+		}
+
+		if memGpuFit[0] != 0 {
+			errMsg += fmt.Sprintf("GpuMemFitNodes:%d,maxCpuFree:%d. ", memGpuFit[0], memGpuFit[1]/1000)
+		}
+
+		if cpuMemFit[0] != 0 {
+			errMsg += fmt.Sprintf("CpuMemFitNodes:%d,maxGpuFree:%d. ", cpuMemFit[0], cpuMemFit[1])
+		}
+
+		if onlyCpuFitRequestWithGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyCpuFitNodes:%d,maxGpuMemFree:%d/%dG. ", onlyCpuFitRequestWithGpu[0],
+				onlyCpuFitRequestWithGpu[2], onlyCpuFitRequestWithGpu[1]/1024/1024/1024)
+		}
+
+		if onlyMemFitRequestWithGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyMemFitNodes:%d,maxGpuCpuFree:%d/%d. ", onlyMemFitRequestWithGpu[0],
+				onlyMemFitRequestWithGpu[2], onlyMemFitRequestWithGpu[1]/1000)
+		}
+		if onlyGpuFitRequestWithGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyGpuFitNodes:%d,maxCpuMemFree:%d/%dG. ", onlyGpuFitRequestWithGpu[0],
+				onlyGpuFitRequestWithGpu[1]/1000, onlyGpuFitRequestWithGpu[2]/1024/1024/1024)
+		}
+
+	} else if resourceTypeCount == 2 {
+		if allNotFit != 0 {
+			errMsg += fmt.Sprintf("CpuMemNotFitNodes:%d. ", allNotFit)
+		}
+		if onlyCpuFitRequestWithoutGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyCpuFitNodes:%d,maxMemFree:%dG. ", onlyCpuFitRequestWithoutGpu[0], onlyCpuFitRequestWithoutGpu[1]/1024/1024/1024)
+		}
+		if onlyMemFitRequestWithoutGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyMemFitNodes:%d,maxCpuFree:%d. ", onlyMemFitRequestWithoutGpu[0], onlyMemFitRequestWithoutGpu[1]/1000)
+		}
+	}
+	return errMsg
 }
 
 // ScheduleAlgorithm is an interface implemented by things that know how to schedule pods
@@ -440,10 +600,10 @@ func (g *genericScheduler) getLowerPriorityNominatedPods(pod *v1.Pod, nodeName s
 
 	var lowerPriorityPods []*v1.Pod
 	podPriority := podutil.GetPodPriority(pod)
-	isTimeOutCronJobPod,_ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+	isTimeOutCronJobPod, _ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
 
 	for _, p := range pods {
-		pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
+		pass, err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
 		if err != nil {
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
 		}
@@ -710,6 +870,10 @@ func (g *genericScheduler) podFitsOnNode(
 					}
 				}
 			}
+		}
+
+		if len(failedPredicates) != 0 {
+			return false, failedPredicates, status, nil
 		}
 
 		status = g.framework.RunFilterPlugins(ctx, stateToUse, pod, nodeInfoToUse)
@@ -1146,7 +1310,7 @@ func (g *genericScheduler) selectVictimsOnNode(
 	// As the first step, remove all the lower priority pods from the node and
 	// check if the given pod can be scheduled.
 	podPriority := podutil.GetPodPriority(pod)
-	isTimeOutCronJobPod,_ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+	isTimeOutCronJobPod, _ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
 
 	for _, p := range nodeInfo.Pods() {
 		if enableNonPreempting && p.Spec.PreemptionPolicy != nil && (*p.Spec.PreemptionPolicy == v1.NonPreemptible || *p.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
@@ -1154,12 +1318,12 @@ func (g *genericScheduler) selectVictimsOnNode(
 			continue
 		}
 
-		pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
+		pass, err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
 		if err != nil {
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
 		}
 
-		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority){
+		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority) {
 			potentialVictims = append(potentialVictims, p)
 			if err := removePod(p); err != nil {
 				return nil, 0, false
@@ -1258,10 +1422,10 @@ func podEligibleToPreemptOthers(pod *v1.Pod, nodeNameToInfo map[string]*schedule
 			podPriority := podutil.GetPodPriority(pod)
 			for _, p := range nodeInfo.Pods() {
 				if p.DeletionTimestamp != nil {
-					pass,err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
+					pass, err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
 					if err != nil {
 						klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
-					}else {
+					} else {
 						if pass {
 							if podutil.GetPodPriority(p) == podPriority {
 								// There is a terminating cron job pod on the nominated node.

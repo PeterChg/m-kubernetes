@@ -19,12 +19,6 @@ package predicates
 import (
 	"errors"
 	"fmt"
-	"os"
-	"regexp"
-	"strconv"
-
-	"k8s.io/klog"
-
 	v1 "k8s.io/api/core/v1"
 	storage "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -37,6 +31,7 @@ import (
 	storagelisters "k8s.io/client-go/listers/storage/v1"
 	volumehelpers "k8s.io/cloud-provider/volume/helpers"
 	csilibplugins "k8s.io/csi-translation-lib/plugins"
+	"k8s.io/klog"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/algorithm"
@@ -46,6 +41,10 @@ import (
 	schedutil "k8s.io/kubernetes/pkg/scheduler/util"
 	"k8s.io/kubernetes/pkg/scheduler/volumebinder"
 	volumeutil "k8s.io/kubernetes/pkg/volume/util"
+	"os"
+	"regexp"
+	"strconv"
+	"strings"
 )
 
 const (
@@ -788,7 +787,6 @@ func PodFitsResources(pod *v1.Pod, meta Metadata, nodeInfo *schedulernodeinfo.No
 	if node == nil {
 		return false, nil, fmt.Errorf("node not found")
 	}
-
 	var predicateFails []PredicateFailureReason
 	allowedPodNumber := nodeInfo.AllowedPodNumber()
 	if len(nodeInfo.Pods())+1 > allowedPodNumber {
@@ -815,17 +813,8 @@ func PodFitsResources(pod *v1.Pod, meta Metadata, nodeInfo *schedulernodeinfo.No
 		return len(predicateFails) == 0, predicateFails, nil
 	}
 
+	var gpuType string
 	allocatable := nodeInfo.AllocatableResource()
-	if allocatable.MilliCPU < podRequest.MilliCPU+nodeInfo.RequestedResource().MilliCPU {
-		predicateFails = append(predicateFails, NewInsufficientResourceError(v1.ResourceCPU, podRequest.MilliCPU, nodeInfo.RequestedResource().MilliCPU, allocatable.MilliCPU))
-	}
-	if allocatable.Memory < podRequest.Memory+nodeInfo.RequestedResource().Memory {
-		predicateFails = append(predicateFails, NewInsufficientResourceError(v1.ResourceMemory, podRequest.Memory, nodeInfo.RequestedResource().Memory, allocatable.Memory))
-	}
-	if allocatable.EphemeralStorage < podRequest.EphemeralStorage+nodeInfo.RequestedResource().EphemeralStorage {
-		predicateFails = append(predicateFails, NewInsufficientResourceError(v1.ResourceEphemeralStorage, podRequest.EphemeralStorage, nodeInfo.RequestedResource().EphemeralStorage, allocatable.EphemeralStorage))
-	}
-
 	for rName, rQuant := range podRequest.ScalarResources {
 		if v1helper.IsExtendedResourceName(rName) {
 			// If this resource is one of the extended resources that should be
@@ -834,9 +823,31 @@ func PodFitsResources(pod *v1.Pod, meta Metadata, nodeInfo *schedulernodeinfo.No
 				continue
 			}
 		}
-		if allocatable.ScalarResources[rName] < rQuant+nodeInfo.RequestedResource().ScalarResources[rName] {
-			predicateFails = append(predicateFails, NewInsufficientResourceError(rName, podRequest.ScalarResources[rName], nodeInfo.RequestedResource().ScalarResources[rName], allocatable.ScalarResources[rName]))
+		if strings.HasPrefix(string(rName), "cloudml.vgpu/") || strings.HasPrefix(string(rName), "cloudml.gpu/") {
+			gpuType = string(rName)
 		}
+
+		if allocatable.ScalarResources[rName] < rQuant+nodeInfo.RequestedResource().ScalarResources[rName] {
+			res := NewInsufficientResourceError(rName, podRequest.ScalarResources[rName], nodeInfo.RequestedResource().ScalarResources[rName], allocatable.ScalarResources[rName])
+			res.SetGpuType(gpuType)
+			predicateFails = append(predicateFails, res)
+		}
+	}
+
+	if allocatable.MilliCPU < podRequest.MilliCPU+nodeInfo.RequestedResource().MilliCPU {
+		res := NewInsufficientResourceError(v1.ResourceCPU, podRequest.MilliCPU, nodeInfo.RequestedResource().MilliCPU, allocatable.MilliCPU)
+		res.SetGpuType(gpuType)
+		predicateFails = append(predicateFails, res)
+	}
+	if allocatable.Memory < podRequest.Memory+nodeInfo.RequestedResource().Memory {
+		res := NewInsufficientResourceError(v1.ResourceMemory, podRequest.Memory, nodeInfo.RequestedResource().Memory, allocatable.Memory)
+		res.SetGpuType(gpuType)
+		predicateFails = append(predicateFails, res)
+	}
+	if allocatable.EphemeralStorage < podRequest.EphemeralStorage+nodeInfo.RequestedResource().EphemeralStorage {
+		res := NewInsufficientResourceError(v1.ResourceEphemeralStorage, podRequest.EphemeralStorage, nodeInfo.RequestedResource().EphemeralStorage, allocatable.EphemeralStorage)
+		res.SetGpuType(gpuType)
+		predicateFails = append(predicateFails, res)
 	}
 
 	if klog.V(10) {

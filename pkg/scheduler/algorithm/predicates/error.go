@@ -122,6 +122,7 @@ type InsufficientResourceError struct {
 	requested    int64
 	used         int64
 	capacity     int64
+	GpuType      string
 }
 
 // NewInsufficientResourceError returns an InsufficientResourceError.
@@ -147,6 +148,18 @@ func (e *InsufficientResourceError) GetReason() string {
 // GetInsufficientAmount returns the amount of the insufficient resource of the error.
 func (e *InsufficientResourceError) GetInsufficientAmount() int64 {
 	return e.requested - (e.capacity - e.used)
+}
+
+// GetFreeAmount returns the unoccupied of the insufficient resource
+func (e *InsufficientResourceError) GetFreeAmount() int64 {
+	return e.capacity - e.used
+}
+
+func (e *InsufficientResourceError) SetGpuType(gpuType string) *InsufficientResourceError {
+	if gpuType != "" {
+		e.GpuType = gpuType
+	}
+	return e
 }
 
 // PredicateFailureError describes a failure error of predicate.

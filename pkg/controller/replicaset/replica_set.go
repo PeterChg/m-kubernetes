@@ -36,15 +36,18 @@ import (
 	"sync"
 	"time"
 
+	"encoding/json"
 	apps "k8s.io/api/apps/v1"
 	"k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
+	"k8s.io/apimachinery/pkg/util/strategicpatch"
 	"k8s.io/apimachinery/pkg/util/wait"
 	appsinformers "k8s.io/client-go/informers/apps/v1"
 	coreinformers "k8s.io/client-go/informers/core/v1"
@@ -70,6 +73,9 @@ const (
 
 	// The number of times we retry updating a ReplicaSet's status.
 	statusUpdateRetries = 1
+
+	//check  whether support update container resource limit inplace
+	UpdateInplaceAnnotationKey = "UpdateInplace"
 )
 
 // ReplicaSetController is responsible for synchronizing ReplicaSet objects stored
@@ -91,6 +97,9 @@ type ReplicaSetController struct {
 
 	// A TTLCache of pod creates/deletes each rc expects to see.
 	expectations *controller.UIDTrackingControllerExpectations
+
+	// A TTLCache of pod update each rc expects to see.
+	updateExpectations *controller.UIDTrackingControllerExpectations
 
 	// A store of ReplicaSets, populated by the shared informer passed to NewReplicaSetController
 	rsLister appslisters.ReplicaSetLister
@@ -133,12 +142,13 @@ func NewBaseController(rsInformer appsinformers.ReplicaSetInformer, podInformer 
 	}
 
 	rsc := &ReplicaSetController{
-		GroupVersionKind: gvk,
-		kubeClient:       kubeClient,
-		podControl:       podControl,
-		burstReplicas:    burstReplicas,
-		expectations:     controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
-		queue:            workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), queueName),
+		GroupVersionKind:   gvk,
+		kubeClient:         kubeClient,
+		podControl:         podControl,
+		burstReplicas:      burstReplicas,
+		expectations:       controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
+		updateExpectations: controller.NewUIDTrackingControllerExpectations(controller.NewControllerExpectations()),
+		queue:              workqueue.NewNamedRateLimitingQueue(workqueue.DefaultControllerRateLimiter(), queueName),
 	}
 
 	rsInformer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -434,6 +444,7 @@ func (rsc *ReplicaSetController) updatePod(old, cur interface{}) {
 	if curControllerRef != nil {
 		rs := rsc.resolveControllerRef(curPod.Namespace, curControllerRef)
 		if rs == nil {
+			klog.V(2).Infof("can not resolve pod: %s/%s controller Ref", curPod.Namespace, curPod.Name)
 			return
 		}
 		klog.V(4).Infof("Pod %s updated, objectMeta %+v -> %+v.", curPod.Name, oldPod.ObjectMeta, curPod.ObjectMeta)
@@ -450,6 +461,17 @@ func (rsc *ReplicaSetController) updatePod(old, cur interface{}) {
 			// Add a second to avoid milliseconds skew in AddAfter.
 			// See https://github.com/kubernetes/kubernetes/issues/39785#issuecomment-279959133 for more info.
 			rsc.enqueueRSAfter(rs, (time.Duration(rs.Spec.MinReadySeconds)*time.Second)+time.Second)
+		}
+
+		if podContainerResLimitChanged(&curPod.Spec, &oldPod.Spec) {
+			klog.V(4).Infof("Pod spec %s updated, Spec %+v -> %+v.", curPod.Name, oldPod.Spec, curPod.Spec)
+
+			rsKey, err := controller.KeyFunc(rs)
+			if err != nil {
+				utilruntime.HandleError(fmt.Errorf("couldn't get key for %v %#v: %v", rsc.Kind, rs, err))
+				return
+			}
+			rsc.updateExpectations.LowerExpectations(rsKey, 1, 0)
 		}
 		return
 	}
@@ -506,6 +528,7 @@ func (rsc *ReplicaSetController) deletePod(obj interface{}) {
 	}
 	klog.V(4).Infof("Pod %s/%s deleted through %v, timestamp %+v: %#v.", pod.Namespace, pod.Name, utilruntime.GetCaller(), pod.DeletionTimestamp, pod)
 	rsc.expectations.DeletionObserved(rsKey, controller.PodKey(pod))
+	rsc.updateExpectations.LowerExpectations(rsKey, 1, 0)
 	rsc.queue.Add(rsKey)
 }
 
@@ -635,6 +658,32 @@ func (rsc *ReplicaSetController) manageReplicas(filteredPods []*v1.Pod, rs *apps
 			}
 		default:
 		}
+	} else if diff == 0 {
+		podsNeedUpdate := getPodsToUpdate(filteredPods, rs)
+		if len(podsNeedUpdate) > 0 {
+			rsc.updateExpectations.ExpectCreations(rsKey, len(podsNeedUpdate))
+			klog.V(2).Infof("replicas(%d) Need update", len(podsNeedUpdate))
+
+			successfulUpdates, err := slowUpdateBatch(len(podsNeedUpdate), controller.SlowStartInitialBatchSize, podsNeedUpdate, func(index int) error {
+				err := rsc.updatePodSpec(podsNeedUpdate[index], rs)
+				if err != nil {
+					podKey := controller.PodKey(podsNeedUpdate[index])
+					klog.Errorf("Failed to update pod: %v, err: %s ", podKey, err.Error())
+				}
+				return err
+			})
+			// Any skipped pods that we never attempted to start shouldn't be expected.
+			// The skipped pods will be retried later. The next controller resync will
+			// retry the slow start process.
+			if skippedPods := len(podsNeedUpdate) - successfulUpdates; skippedPods > 0 {
+				klog.V(2).Infof("Slow-update failure. Skipping update of %d pods, decrementing expectations for %v %v/%v", skippedPods, rsc.Kind, rs.Namespace, rs.Name)
+				for i := 0; i < skippedPods; i++ {
+					// Decrement the expected number of creates because the informer won't observe this pod
+					rsc.updateExpectations.CreationObserved(rsKey)
+				}
+			}
+			return err
+		}
 	}
 
 	return nil
@@ -663,7 +712,7 @@ func (rsc *ReplicaSetController) syncReplicaSet(key string) error {
 		return err
 	}
 
-	rsNeedsSync := rsc.expectations.SatisfiedExpectations(key)
+	rsNeedsSync := rsc.expectations.SatisfiedExpectations(key) && rsc.updateExpectations.SatisfiedExpectations(key)
 	selector, err := metav1.LabelSelectorAsSelector(rs.Spec.Selector)
 	if err != nil {
 		utilruntime.HandleError(fmt.Errorf("error converting pod selector to selector: %v", err))
@@ -764,6 +813,38 @@ func slowStartBatch(count int, initialBatchSize int, fn func() error) (int, erro
 	return successes, nil
 }
 
+// It returns the number of successful calls to the function.
+func slowUpdateBatch(count int, initialBatchSize int, needUpdatePods []*v1.Pod, fn func(int) error) (int, error) {
+	remaining := count
+	successes := 0
+	index := 0
+
+	for batchSize := integer.IntMin(remaining, initialBatchSize); batchSize > 0; batchSize = integer.IntMin(2*batchSize, remaining) {
+		errCh := make(chan error, batchSize)
+		var wg sync.WaitGroup
+		wg.Add(batchSize)
+		for i := 0; i < batchSize; i++ {
+			go func() {
+				defer wg.Done()
+				if index < count {
+					if err := fn(index); err != nil {
+						errCh <- err
+					} else {
+						successes++
+					}
+				}
+				index += 1
+			}()
+		}
+		wg.Wait()
+		if len(errCh) > 0 {
+			return successes, <-errCh
+		}
+		remaining -= batchSize
+	}
+	return successes, nil
+}
+
 // getIndirectlyRelatedPods returns all pods that are owned by any ReplicaSet
 // that is owned by the given ReplicaSet's owner.
 func (rsc *ReplicaSetController) getIndirectlyRelatedPods(rs *apps.ReplicaSet) ([]*v1.Pod, error) {
@@ -805,6 +886,115 @@ func getPodsToDelete(filteredPods, relatedPods []*v1.Pod, diff int) []*v1.Pod {
 		sort.Sort(podsWithRanks)
 	}
 	return filteredPods[:diff]
+}
+
+func podContainerResLimitChanged(pod1Spec, pod2Spec *v1.PodSpec) bool {
+	pcLimitChanged := false
+	pod1SpecCopy := pod1Spec.DeepCopy()
+	pod2SpecCopy := pod2Spec.DeepCopy()
+
+	for k1, container1 := range pod1SpecCopy.Containers {
+		if pcLimitChanged {
+			break
+		}
+
+		for k2, container2 := range pod2SpecCopy.Containers {
+			if container1.Name == container2.Name {
+				if pod1SpecCopy.Containers[k1].Resources.Limits.Cpu().Cmp(*pod2SpecCopy.Containers[k2].Resources.Limits.Cpu()) != 0 ||
+					pod1SpecCopy.Containers[k1].Resources.Limits.Memory().Cmp(*pod2SpecCopy.Containers[k2].Resources.Limits.Memory()) != 0 {
+					pcLimitChanged = true
+				}
+				break
+			}
+		}
+	}
+
+	return pcLimitChanged
+}
+
+func getPodsToUpdate(filteredPods []*v1.Pod, rs *apps.ReplicaSet) []*v1.Pod {
+	var needUpdatePods []*v1.Pod
+
+	for _, pod := range filteredPods {
+		if podContainerResLimitChanged(&pod.Spec, &rs.Spec.Template.Spec) {
+			needUpdatePods = append(needUpdatePods, pod)
+		}
+	}
+	return needUpdatePods
+}
+
+func (rsc *ReplicaSetController) updatePodSpec(pod *v1.Pod, rs *apps.ReplicaSet) error {
+
+	var modifyType = ""
+	newPod := pod.DeepCopy()
+
+	if modifyType = rsc.determinePodLimitUpdateDirection(pod, rs); "" == modifyType {
+		return fmt.Errorf("pod: %s/%s determine update resource limit direction failed", pod.Namespace, pod.Name)
+	}
+	if newPod.Annotations == nil {
+		newPod.Annotations = make(map[string]string)
+	}
+	newPod.Annotations[UpdateInplaceAnnotationKey] = modifyType
+	for k1, v1 := range newPod.Spec.Containers {
+		for _, v2 := range rs.Spec.Template.Spec.Containers {
+			if v1.Name == v2.Name {
+				newPod.Spec.Containers[k1].Resources = v2.Resources
+				break
+			}
+		}
+	}
+
+	oldPodData, err := json.Marshal(pod)
+	if err != nil {
+		return fmt.Errorf("failed to marshal the existing pod %#v: %v", pod, err)
+	}
+	newPodData, err := json.Marshal(newPod)
+	if err != nil {
+		return fmt.Errorf("failed to marshal the new pod %#v: %v", newPod, err)
+	}
+	patchBytes, err := strategicpatch.CreateTwoWayMergePatch(oldPodData, newPodData, &v1.Pod{})
+	if err != nil {
+		return fmt.Errorf("failed to create a two-way merge patch: %v", err)
+	}
+
+	err = rsc.podControl.PatchPod(pod.Namespace, pod.Name, patchBytes)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			// If the pod no longer exists, ignore it.
+			return nil
+		}
+	}
+	return err
+}
+
+//determinePodLimitUpdateDirection return an type of how to update container cgroup in kubelet
+//pod's all container resource limit are modified up or down at the same time, that restricted in kube-apiserver
+func (rsc *ReplicaSetController) determinePodLimitUpdateDirection(pod *v1.Pod, rs *apps.ReplicaSet) string {
+	pod1SpecCopy := pod.Spec.DeepCopy()
+	pod2SpecCopy := rs.Spec.Template.Spec.DeepCopy()
+	var pod1CpuResource, pod2CpuResource resource.Quantity
+
+	//with the help of check in deployment_controller, assume pod Qos Type and containers number are validate here
+	if len(pod1SpecCopy.Containers) != len(pod2SpecCopy.Containers) {
+		return ""
+	}
+
+	for i := 0; i < len(pod1SpecCopy.Containers); i++ {
+		container1 := pod1SpecCopy.Containers[i]
+		container2 := pod2SpecCopy.Containers[i]
+		pod1CpuResource.Add(*container1.Resources.Limits.Cpu())
+		pod2CpuResource.Add(*container2.Resources.Limits.Cpu())
+	}
+
+	//the cpu or mem total num may not changed, but changes may occur between containers
+	res := pod1CpuResource.Cmp(pod2CpuResource)
+	if res == 1 {
+		return "down"
+	} else if res == -1 {
+		return "up"
+	}
+
+	return "down"
 }
 
 // getPodsRankedByRelatedPodsOnSameNode returns an ActivePodsWithRanks value

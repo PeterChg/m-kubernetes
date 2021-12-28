@@ -30,6 +30,7 @@ const (
 	ConfigMirrorAnnotationKey    = v1.MirrorPodAnnotationKey
 	ConfigFirstSeenAnnotationKey = "kubernetes.io/config.seen"
 	ConfigHashAnnotationKey      = "kubernetes.io/config.hash"
+	UpdateInplaceAnnotationKey   = "UpdateInplace"
 )
 
 // PodOperation defines what changes will be made on a pod configuration.
@@ -183,4 +184,9 @@ func Preemptable(preemptor, preemptee *v1.Pod) bool {
 // IsCriticalPodBasedOnPriority checks if the given pod is a critical pod based on priority resolved from pod Spec.
 func IsCriticalPodBasedOnPriority(priority int32) bool {
 	return priority >= scheduling.SystemCriticalPriority
+}
+
+func IsUpdateInplacePod(pod *v1.Pod) bool {
+	_, ok := pod.Annotations[UpdateInplaceAnnotationKey]
+	return ok
 }

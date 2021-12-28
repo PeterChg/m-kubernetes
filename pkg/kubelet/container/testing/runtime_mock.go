@@ -156,3 +156,8 @@ func (r *Mock) ImageStats() (*kubecontainer.ImageStats, error) {
 func (r *Mock) UpdatePodCIDR(c string) error {
 	return nil
 }
+
+func (r *Mock) UpdatePodContainersConfig(pod *v1.Pod, podStatus *kubecontainer.PodStatus) kubecontainer.PodSyncResult {
+	args := r.Called(pod, podStatus)
+	return args.Get(0).(kubecontainer.PodSyncResult)
+}

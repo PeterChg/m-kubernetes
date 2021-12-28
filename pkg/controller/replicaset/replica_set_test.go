@@ -33,6 +33,7 @@ import (
 	apps "k8s.io/api/apps/v1"
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -164,6 +165,26 @@ func newPodList(store cache.Store, count int, status v1.PodPhase, labelMap map[s
 	controllerReference := metav1.OwnerReference{UID: rs.UID, APIVersion: "v1beta1", Kind: "ReplicaSet", Name: rs.Name, Controller: &trueVar}
 	for i := 0; i < count; i++ {
 		pod := newPod(fmt.Sprintf("%s%d", name, i), rs, status, nil, false)
+		pod.ObjectMeta.Labels = labelMap
+		pod.OwnerReferences = []metav1.OwnerReference{controllerReference}
+		if store != nil {
+			store.Add(pod)
+		}
+		pods = append(pods, *pod)
+	}
+	return &v1.PodList{
+		Items: pods,
+	}
+}
+
+// create count pods with the given phase for the given ReplicaSet (same selectors and namespace), and add them to the store.
+func newPodListWithSpec(store cache.Store, count int, status v1.PodPhase, labelMap map[string]string, rs *apps.ReplicaSet, name string) *v1.PodList {
+	pods := []v1.Pod{}
+	var trueVar = true
+	controllerReference := metav1.OwnerReference{UID: rs.UID, APIVersion: "v1beta1", Kind: "ReplicaSet", Name: rs.Name, Controller: &trueVar}
+	for i := 0; i < count; i++ {
+		pod := newPod(fmt.Sprintf("%s%d", name, i), rs, status, nil, false)
+		pod.Spec = *rs.Spec.Template.Spec.DeepCopy()
 		pod.ObjectMeta.Labels = labelMap
 		pod.OwnerReferences = []metav1.OwnerReference{controllerReference}
 		if store != nil {
@@ -501,6 +522,110 @@ func TestPodControllerLookup(t *testing.T) {
 		} else if c.outRSName != "" {
 			t.Errorf("Expected a replica set %v pod %v, found none", c.outRSName, c.pod.Name)
 		}
+	}
+}
+
+func TestSyncReplicaSetUpdate(t *testing.T) {
+	client := clientset.NewForConfigOrDie(&restclient.Config{Host: "", ContentConfig: restclient.ContentConfig{GroupVersion: &schema.GroupVersion{Group: "", Version: "v1"}}})
+	fakePodControl := controller.FakePodControl{}
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	manager, informers := testNewReplicaSetControllerFromClient(client, stopCh, BurstReplicas)
+
+	// 2 running pods, a controller with 2 replicas, sync is a no-op
+	labelMap := map[string]string{"foo": "bar"}
+	rsSpec := newReplicaSet(2, labelMap)
+	rsSpec.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(3), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	informers.Apps().V1().ReplicaSets().Informer().GetIndexer().Add(rsSpec)
+	newPodListWithSpec(informers.Core().V1().Pods().Informer().GetIndexer(), 2, v1.PodRunning, labelMap, rsSpec, "pod")
+
+	manager.podControl = &fakePodControl
+	manager.syncReplicaSet(GetKey(rsSpec, t))
+	err := validateSyncReplicaSet(&fakePodControl, 0, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	//3. turn up resource limit in rs template
+	rsSpec.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	rsSpec.Spec.Template.Annotations = make(map[string]string)
+
+	informers.Apps().V1().ReplicaSets().Informer().GetIndexer().Update(rsSpec)
+	manager.podControl = &fakePodControl
+	manager.syncReplicaSet(GetKey(rsSpec, t))
+	err = validateSyncReplicaSet(&fakePodControl, 0, 0, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manager.updateExpectations.DeleteExpectations(GetKey(rsSpec, t))
+
+	//4 turn down resource limit in rs template
+	rsSpec.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	rsSpec.Spec.Template.Annotations = make(map[string]string)
+
+	informers.Apps().V1().ReplicaSets().Informer().GetIndexer().Update(rsSpec)
+	manager.podControl = &fakePodControl
+	manager.syncReplicaSet(GetKey(rsSpec, t))
+	err = validateSyncReplicaSet(&fakePodControl, 0, 0, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manager.updateExpectations.SatisfiedExpectations(GetKey(rsSpec, t)) {
+		t.Fatal("turn down pod failed")
+	}
+	manager.updateExpectations.DeleteExpectations(GetKey(rsSpec, t))
+
+	//5 turn down resource limit, but PatchPod failed
+	rsSpec.Spec.Template.Spec.Containers[0].Resources = v1.ResourceRequirements{
+		Limits: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(300), resource.DecimalSI),
+		},
+		Requests: v1.ResourceList{
+			"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+			"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+		},
+	}
+	rsSpec.Spec.Template.Annotations = make(map[string]string)
+
+	informers.Apps().V1().ReplicaSets().Informer().GetIndexer().Update(rsSpec)
+	fakePodControl.Err = errors.New("patch failed")
+	manager.podControl = &fakePodControl
+	manager.syncReplicaSet(GetKey(rsSpec, t))
+	err = validateSyncReplicaSet(&fakePodControl, 0, 0, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !manager.updateExpectations.SatisfiedExpectations(GetKey(rsSpec, t)) {
+		t.Fatal("turn down pod failed")
 	}
 }
 

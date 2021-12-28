@@ -495,8 +495,18 @@ func (m *kubeGenericRuntimeManager) podSandboxChanged(pod *v1.Pod, podStatus *ku
 	return false, sandboxStatus.Metadata.Attempt, sandboxStatus.Id
 }
 
-func containerChanged(container *v1.Container, containerStatus *kubecontainer.Status) (uint64, uint64, bool) {
-	expectedHash := kubecontainer.HashContainer(container)
+func containerChanged(container *v1.Container, pod *v1.Pod, containerStatus *kubecontainer.Status) (uint64, uint64, bool) {
+	var expectedHash uint64
+	if types.IsUpdateInplacePod(pod) {
+		expectedHash = kubecontainer.HashContainerWithOutResourceLimit(container)
+	} else {
+		expectedHash = kubecontainer.HashContainer(container)
+		if containerStatus.Hash != expectedHash {
+			//if container created with updateInplace annotation setted, but Unset the value when container is running
+			//Add this logic in order to prevent Meaningless container restart
+			expectedHash = kubecontainer.HashContainerWithOutResourceLimit(container)
+		}
+	}
 	return expectedHash, containerStatus.Hash, containerStatus.Hash != expectedHash
 }
 
@@ -647,7 +657,7 @@ func (m *kubeGenericRuntimeManager) computePodActions(pod *v1.Pod, podStatus *ku
 		var message string
 		var reason containerKillReason
 		restart := shouldRestartOnFailure(pod)
-		if _, _, changed := containerChanged(&container, containerStatus); changed {
+		if _, _, changed := containerChanged(&container, pod, containerStatus); changed {
 			message = fmt.Sprintf("Container %s definition changed", container.Name)
 			// Restart regardless of the restart policy because the container
 			// spec changed.
@@ -1048,4 +1058,27 @@ func (m *kubeGenericRuntimeManager) UpdatePodCIDR(podCIDR string) error {
 				PodCidr: podCIDR,
 			},
 		})
+}
+
+//UpdatePodContainersConfig update pod's container resource config
+func (m *kubeGenericRuntimeManager) UpdatePodContainersConfig(pod *v1.Pod, podStatus *kubecontainer.PodStatus) (result kubecontainer.PodSyncResult) {
+
+	for _, container := range pod.Spec.Containers {
+		updateContainerResult := kubecontainer.NewSyncResult(kubecontainer.UpdateContainer, container.Name)
+		result.AddSyncResult(updateContainerResult)
+
+		containerStatus := podStatus.FindContainerStatusByName(container.Name)
+		if containerStatus == nil {
+			updateContainerResult.Fail(errors.New(fmt.Sprintf("not find container:%s status", container.Name)), ErrUpdateContainer.Error())
+			return
+		}
+
+		klog.V(4).InfoS("Updating container in pod", "containerType", "container", "container", container, "pod", klog.KObj(pod))
+		//todo retry when update container is false
+		if msg, err := m.updateContainer(&container, containerStatus.ID.ID, pod); err != nil {
+			klog.V(3).InfoS("Update container failed in pod", "containerType", "container", "container", container, "pod", klog.KObj(pod), "containerMessage", msg, "err", err)
+			updateContainerResult.Fail(err, msg)
+		}
+	}
+	return
 }

@@ -127,4 +127,7 @@ type PodContainerManager interface {
 
 	// IsPodCgroup returns true if the literal cgroupfs name corresponds to a pod
 	IsPodCgroup(cgroupfs string) (bool, types.UID)
+
+	// Update update pod cgroup config
+	Update(pod *v1.Pod) error
 }

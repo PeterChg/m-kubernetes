@@ -56,6 +56,8 @@ const (
 	StartContainer SyncAction = "StartContainer"
 	// KillContainer action
 	KillContainer SyncAction = "KillContainer"
+	// UpdateContainer action
+	UpdateContainer SyncAction = "UpdateContainer"
 	// SetupNetwork action
 	SetupNetwork SyncAction = "SetupNetwork"
 	// TeardownNetwork action

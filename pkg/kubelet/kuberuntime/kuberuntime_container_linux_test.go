@@ -367,3 +367,43 @@ func TestGenerateLinuxContainerConfigNamespaces(t *testing.T) {
 		})
 	}
 }
+
+func TestGenerateLinuxContainerResourceConfig(t *testing.T) {
+	_, _, m, err := createTestRuntimeManager()
+	assert.NoError(t, err)
+
+	pod := &v1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "12345678",
+			Name:      "bar",
+			Namespace: "new",
+		},
+		Spec: v1.PodSpec{
+			Containers: []v1.Container{
+				{
+					Name: "foo",
+					Resources: v1.ResourceRequirements{
+						Limits: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+						Requests: v1.ResourceList{
+							"cpu":    *resource.NewQuantity(int64(2), resource.DecimalSI),
+							"memory": *resource.NewQuantity(int64(200), resource.DecimalSI),
+						},
+					},
+				},
+			},
+		},
+	}
+	m.cpuCFSQuota = true
+	containerConfig := m.generateLinuxContainerResourceConfig(&pod.Spec.Containers[0], pod)
+
+	cpuRequest := pod.Spec.Containers[0].Resources.Requests.Cpu()
+	cpuLimit := pod.Spec.Containers[0].Resources.Limits.Cpu()
+	memoryLimit := pod.Spec.Containers[0].Resources.Limits.Memory().Value()
+
+	assert.Equal(t, containerConfig.CpuQuota, milliCPUToQuota(cpuLimit.MilliValue(), containerConfig.CpuPeriod), "generate linux container resource config")
+	assert.Equal(t, containerConfig.CpuShares, milliCPUToShares(cpuRequest.MilliValue()), "generate linux container resource config")
+	assert.Equal(t, containerConfig.MemoryLimitInBytes, memoryLimit, "generate linux container resource config")
+}

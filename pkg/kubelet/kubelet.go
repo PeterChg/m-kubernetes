@@ -1723,8 +1723,24 @@ func (kl *Kubelet) syncPod(o syncPodOptions) error {
 				return err
 			}
 		}
+	}
 
-		return nil
+	if podUpdDirt := kl.podUpdateDirection(pod); podUpdDirt != "" {
+		if kl.needResizePodResourceLimit(pod) {
+			if podUpdDirt == "up" {
+				result, err := kl.increasePodResourceLimit(pcm, pod, podStatus)
+				kl.reasonCache.Update(pod.UID, result)
+				if err != nil {
+					return err
+				}
+			} else if podUpdDirt == "down" {
+				result, err := kl.decreasePodResourceLimit(pcm, pod, podStatus)
+				kl.reasonCache.Update(pod.UID, result)
+				if err != nil {
+					return err
+				}
+			}
+		}
 	}
 
 	return nil
@@ -2328,6 +2344,84 @@ func (kl *Kubelet) fastStatusUpdateOnce() {
 			return
 		}
 	}
+}
+
+func (kl *Kubelet) podUpdateDirection(pod *v1.Pod) string {
+	if v, ok := pod.Annotations[kubetypes.UpdateInplaceAnnotationKey]; ok {
+		return v
+	}
+	return ""
+}
+
+func (kl *Kubelet) increasePodResourceLimit(pcm cm.PodContainerManager, pod *v1.Pod, podStatus *kubecontainer.PodStatus) (result kubecontainer.PodSyncResult, err error) {
+	updatePodCgroupResult := kubecontainer.NewSyncResult(kubecontainer.UpdateContainer, pod.Spec.Containers[0].Name)
+	result.AddSyncResult(updatePodCgroupResult)
+
+	if err := pcm.Update(pod); err != nil {
+		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToUpdateContainer, "unable to update pod cgroups: %v", err)
+		klog.ErrorS(err, "failed to update the pod cgroups", "pod", klog.KObj(pod))
+		updatePodCgroupResult.Fail(kuberuntime.ErrUpdateContainer, "failed to update the pod cgroups")
+		return result, err
+	}
+
+	//todo retry when update container is false
+	updateResult := kl.containerRuntime.UpdatePodContainersConfig(pod, podStatus)
+	result.AddSyncResult(updateResult.SyncResults...)
+
+	//whether need to update resoncache
+	//kl.reasonCache.Update(pod.UID, result)
+	if err := result.Error(); err != nil {
+		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToUpdateContainer, "unable to update pod containers cgroups: %v", err)
+		klog.ErrorS(err, "failed to update that the pod containers cgroups", "pod", klog.KObj(pod))
+		return result, err
+	}
+	kl.recordResizePodResourceLimitResult(pod)
+	return result, nil
+}
+
+func (kl *Kubelet) decreasePodResourceLimit(pcm cm.PodContainerManager, pod *v1.Pod, podStatus *kubecontainer.PodStatus) (result kubecontainer.PodSyncResult, err error) {
+	//todo retry when update container is false
+	updateResult := kl.containerRuntime.UpdatePodContainersConfig(pod, podStatus)
+	result.AddSyncResult(updateResult.SyncResults...)
+
+	//whether need to update resoncache
+	//kl.reasonCache.Update(pod.UID, result)
+	if err := result.Error(); err != nil {
+		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToUpdateContainer, "unable to update pod containers cgroups: %v", err)
+		klog.ErrorS(err, "failed to update that the pod containers cgroups", "pod", klog.KObj(pod))
+		return result, err
+	}
+
+	updatePodCgroupResult := kubecontainer.NewSyncResult(kubecontainer.UpdateContainer, pod.Spec.Containers[0].Name)
+	result.AddSyncResult(updatePodCgroupResult)
+
+	if err := pcm.Update(pod); err != nil {
+		kl.recorder.Eventf(pod, v1.EventTypeWarning, events.FailedToUpdateContainer, "unable to update pod cgroups: %v", err)
+		klog.ErrorS(err, "failed to update the pod cgroups", "pod", klog.KObj(pod))
+		updatePodCgroupResult.Fail(kuberuntime.ErrUpdateContainer, "failed to update the pod cgroups")
+		return result, err
+	}
+	kl.recordResizePodResourceLimitResult(pod)
+	return result, nil
+}
+
+func (kl *Kubelet) needResizePodResourceLimit(pod *v1.Pod) bool {
+	podGet, exit := kl.podManager.GetPodByName(pod.Namespace, pod.Name)
+	if !exit {
+		klog.V(2).InfoS("Failed to get pod from podManager", "pod", klog.KObj(pod))
+		return true
+	}
+
+	if _, ok := podGet.Annotations["inplace_update_finished"]; ok {
+		klog.V(2).InfoS("get pod inplace update progress flag", "pod", klog.KObj(pod))
+		return false
+	}
+	return true
+}
+
+func (kl *Kubelet) recordResizePodResourceLimitResult(pod *v1.Pod) {
+	pod.Annotations["inplace_update_finished"] = ""
+	kl.podManager.UpdatePod(pod)
 }
 
 // isSyncPodWorthy filters out events that are not worthy of pod syncing

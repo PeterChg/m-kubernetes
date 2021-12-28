@@ -1856,8 +1856,16 @@ func (kl *Kubelet) convertToAPIContainerStatuses(pod *v1.Pod, podStatus *kubecon
 		}
 		// If a container should be restarted in next syncpod, it is *Waiting*.
 		if !kubecontainer.ShouldContainerBeRestarted(&container, pod, podStatus) {
-			continue
+			if pod.DeletionTimestamp != nil {
+				continue
+			}
+
+			status := podStatus.FindContainerStatusByName(container.Name)
+			if !(status != nil && status.State == kubecontainer.ContainerStateRunning && kubetypes.IsUpdateInplacePod(pod)) {
+				continue
+			}
 		}
+
 		status := statuses[container.Name]
 		reason, ok := kl.reasonCache.Get(pod.UID, container.Name)
 		if !ok {

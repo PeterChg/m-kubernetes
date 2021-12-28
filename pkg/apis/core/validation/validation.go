@@ -47,6 +47,7 @@ import (
 	apiservice "k8s.io/kubernetes/pkg/api/service"
 	"k8s.io/kubernetes/pkg/apis/core"
 	"k8s.io/kubernetes/pkg/apis/core/helper"
+	qoshelper "k8s.io/kubernetes/pkg/apis/core/helper/qos"
 	podshelper "k8s.io/kubernetes/pkg/apis/core/pods"
 	corev1 "k8s.io/kubernetes/pkg/apis/core/v1"
 	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
@@ -4027,6 +4028,11 @@ func ValidatePodUpdate(newPod, oldPod *core.Pod, opts PodValidationOptions) fiel
 	// tolerations are checked before the deep copy, so munge those too
 	mungedPodSpec.Tolerations = oldPod.Spec.Tolerations // +k8s:verify-mutation:reason=clone
 
+	//check container QOS type ,if type is guaranteed or best-effort, can not modify resource limit
+	if canPodUpdateInpace(newPod) {
+		checkAndReplacePodResourceLimit(oldPod, newPod, &mungedPodSpec)
+	}
+
 	if !apiequality.Semantic.DeepEqual(mungedPodSpec, oldPod.Spec) {
 		// This diff isn't perfect, but it's a helluva lot better an "I'm not going to tell you what the difference is".
 		//TODO: Pinpoint the specific field that causes the invalid error after we have strategic merge diff
@@ -6427,4 +6433,60 @@ func sameLoadBalancerClass(oldService, service *core.Service) bool {
 		return false
 	}
 	return *oldService.Spec.LoadBalancerClass == *service.Spec.LoadBalancerClass
+}
+
+//check pod allow update inplace
+func canPodUpdateInpace(pod *core.Pod) bool {
+	_, ok := pod.Annotations["UpdateInplace"]
+	return ok
+}
+
+//check pod allow update inplace
+func checkAndReplacePodResourceLimit(oldPod, newPod *core.Pod, mungedPodSpec *core.PodSpec) {
+	var sameCount = 0
+	var oldPodContainersCount = len(oldPod.Spec.Containers)
+	var mungedPodContainersCount = len(mungedPodSpec.Containers)
+
+	if core.PodQOSBurstable != qoshelper.GetPodQOS(oldPod) ||
+		core.PodQOSBurstable != qoshelper.GetPodQOS(newPod) {
+		return
+	}
+
+	//need to check whether the number of container or Qos type Of pod have changed
+	for _, oldContainer := range oldPod.Spec.Containers {
+		for _, mungedContainer := range mungedPodSpec.Containers {
+			if oldContainer.Name == mungedContainer.Name {
+				sameCount++
+				break
+			}
+		}
+	}
+
+	if sameCount == oldPodContainersCount && sameCount == mungedPodContainersCount {
+		for k1, oldContainer := range oldPod.Spec.Containers {
+			for k2, mungedContainer := range mungedPodSpec.Containers {
+				if oldContainer.Name == mungedContainer.Name {
+					cpu := oldContainer.Resources.Limits[core.ResourceCPU]
+					mem := oldContainer.Resources.Limits[core.ResourceMemory]
+
+					if mungedPodSpec.Containers[k2].Resources.Limits == nil {
+						mungedPodSpec.Containers[k2].Resources.Limits = core.ResourceList{}
+					}
+
+					if cpu.Value() != 0 {
+						mungedPodSpec.Containers[k2].Resources.Limits[core.ResourceCPU] = oldPod.Spec.Containers[k1].Resources.Limits[core.ResourceCPU]
+					} else {
+						delete(mungedPodSpec.Containers[k2].Resources.Limits, core.ResourceCPU)
+					}
+
+					if mem.Value() != 0 {
+						mungedPodSpec.Containers[k2].Resources.Limits[core.ResourceMemory] = oldPod.Spec.Containers[k1].Resources.Limits[core.ResourceMemory]
+					} else {
+						delete(mungedPodSpec.Containers[k2].Resources.Limits, core.ResourceMemory)
+					}
+					break
+				}
+			}
+		}
+	}
 }

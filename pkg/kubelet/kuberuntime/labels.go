@@ -111,8 +111,11 @@ func newContainerAnnotations(container *v1.Container, pod *v1.Pod, restartCount 
 	for _, a := range opts.Annotations {
 		annotations[a.Name] = a.Value
 	}
-
-	annotations[containerHashLabel] = strconv.FormatUint(kubecontainer.HashContainer(container), 16)
+	if types.IsUpdateInplacePod(pod) {
+		annotations[containerHashLabel] = strconv.FormatUint(kubecontainer.HashContainerWithOutResourceLimit(container), 16)
+	} else {
+		annotations[containerHashLabel] = strconv.FormatUint(kubecontainer.HashContainer(container), 16)
+	}
 	annotations[containerRestartCountLabel] = strconv.Itoa(restartCount)
 	annotations[containerTerminationMessagePathLabel] = container.TerminationMessagePath
 	annotations[containerTerminationMessagePolicyLabel] = string(container.TerminationMessagePolicy)

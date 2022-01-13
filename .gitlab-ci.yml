@@ -51,7 +51,7 @@ release-images:
     - export KUBE_DOCKER_REGISTRY=cr.d.xiaomi.net/containercloud
     - export KUBE_BASE_IMAGE_REGISTRY=cr.d.xiaomi.net/containercloud
     - docker login -u "$DOCKER_REGISTRY_USER" -p "$DOCKER_REGISTRY_PASSWORD" cr.d.xiaomi.net
-    -  export KUBE_DOCKER_IMAGE_TAG=v1.21.3-mi-v1.21.3-dev-nightly-build
+    - export KUBE_DOCKER_IMAGE_TAG=v1.21.3-mi-v1.21.3-dev
     - make quick-release-images
     - bash build/upload-all-images.sh
   only:

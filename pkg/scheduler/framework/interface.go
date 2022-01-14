@@ -21,6 +21,7 @@ package framework
 import (
 	"context"
 	"errors"
+	"k8s.io/kubernetes/pkg/scheduler/util"
 	"math"
 	"strings"
 	"time"
@@ -114,7 +115,8 @@ type Status struct {
 	err     error
 	// failedPlugin is an optional field that records the plugin name a Pod failed by.
 	// It's set by the framework when code is Error, Unschedulable or UnschedulableAndUnresolvable.
-	failedPlugin string
+	failedPlugin             string
+	resourceInsufficientInfo []*util.InsufficientResource
 }
 
 // Code returns code of the Status.
@@ -198,6 +200,10 @@ func (s *Status) Equal(x *Status) bool {
 	return cmp.Equal(s.reasons, x.reasons)
 }
 
+func (s *Status) SetResourceInsufficientInfo(info []*util.InsufficientResource) {
+	s.resourceInsufficientInfo = info
+}
+
 // NewStatus makes a Status out of the given arguments and returns its pointer.
 func NewStatus(code Code, reasons ...string) *Status {
 	s := &Status{
@@ -243,6 +249,10 @@ func (p PluginToStatus) Merge() *Status {
 
 		for _, r := range s.reasons {
 			finalStatus.AppendReason(r)
+		}
+
+		if len(s.resourceInsufficientInfo) > 0 && len(finalStatus.resourceInsufficientInfo) == 0 {
+			finalStatus.resourceInsufficientInfo = s.resourceInsufficientInfo
 		}
 	}
 

@@ -222,6 +222,11 @@ type FitError struct {
 	Diagnosis   Diagnosis
 }
 
+type DetailFitInfo struct {
+	FitInfo    map[string]int64
+	NotFitInfo map[string]int64
+}
+
 const (
 	// NoNodeAvailableMsg is used to format message when no nodes available.
 	NoNodeAvailableMsg = "0/%v nodes are available"
@@ -245,7 +250,168 @@ func (f *FitError) Error() string {
 		return reasonStrings
 	}
 	reasonMsg := fmt.Sprintf(NoNodeAvailableMsg+": %v.", f.NumAllNodes, strings.Join(sortReasonsHistogram(), ", "))
-	return reasonMsg
+	if detailedErrMsg := f.detailInsufficientResourceErrorMsg(); detailedErrMsg != "" {
+		reasonMsg += " " + detailedErrMsg
+	}
+
+	return reasonMsg + "Detailed explanation-->https://cloud.d.xiaomi.net/product/docs/cloudml/sched"
+}
+
+//detailInsufficientResourceErrorMsg return detailed insufficient Resource error msg
+func (f *FitError) detailInsufficientResourceErrorMsg() string {
+
+	detailInfo := make(map[string]DetailFitInfo)
+	var resourceTypeCount = 2
+	for node, status := range f.Diagnosis.NodeToStatusMap {
+		dfi := DetailFitInfo{FitInfo: make(map[string]int64), NotFitInfo: make(map[string]int64)}
+		dfi.FitInfo[string(v1.ResourceCPU)] = 0
+		dfi.FitInfo[string(v1.ResourceMemory)] = 0
+
+		if len(status.resourceInsufficientInfo) == 0 {
+			continue
+		}
+
+		for _, v := range status.resourceInsufficientInfo {
+			if v.GpuType != "" {
+				resourceTypeCount = 3
+				dfi.FitInfo["gpu"] = 0
+			}
+
+			if v.ResourceName == v1.ResourceCPU {
+				dfi.NotFitInfo[string(v1.ResourceCPU)] = v.GetFreeAmount()
+				delete(dfi.FitInfo, string(v1.ResourceCPU))
+			} else if v.ResourceName == v1.ResourceMemory {
+				dfi.NotFitInfo[string(v1.ResourceMemory)] = v.GetFreeAmount()
+				delete(dfi.FitInfo, string(v1.ResourceMemory))
+			} else if strings.HasPrefix(string(v.ResourceName), "cloudml.vgpu/") ||
+				strings.HasPrefix(string(v.ResourceName), "cloudml.gpu/") {
+				dfi.NotFitInfo["gpu"] = v.GetFreeAmount()
+				delete(dfi.FitInfo, "gpu")
+			}
+		}
+		detailInfo[node] = dfi
+	}
+
+	if len(detailInfo) == 0 {
+		return ""
+	}
+
+	klog.V(6).Infof("detailed Insufficient Resource Error Msg %d, %v ", resourceTypeCount, detailInfo)
+	allNotFit := 0
+	cpuMemFit := make([]int64, 2)
+	cpuGpuFit := make([]int64, 2)
+	memGpuFit := make([]int64, 2)
+
+	//slice Fill in order: count, max free cpu, max free mem, max free gpu
+	onlyCpuFitRequestWithGpu := make([]int64, 3)
+	onlyMemFitRequestWithGpu := make([]int64, 3)
+	onlyGpuFitRequestWithGpu := make([]int64, 3)
+
+	//slice Fill in order: count, max free cpu, max free mem
+	onlyCpuFitRequestWithoutGpu := make([]int64, 2)
+	onlyMemFitRequestWithoutGpu := make([]int64, 2)
+
+	for _, v := range detailInfo {
+		if len(v.NotFitInfo) == resourceTypeCount {
+			allNotFit++
+		} else if len(v.NotFitInfo) == 2 && resourceTypeCount == 3 {
+			if _, ok := v.FitInfo[string(v1.ResourceCPU)]; ok {
+				onlyCpuFitRequestWithGpu[0]++
+				if v.NotFitInfo[string(v1.ResourceMemory)] >= onlyCpuFitRequestWithGpu[1] && v.NotFitInfo["gpu"] >= onlyCpuFitRequestWithGpu[2] {
+					onlyCpuFitRequestWithGpu[1] = v.NotFitInfo[string(v1.ResourceMemory)]
+					onlyCpuFitRequestWithGpu[2] = v.NotFitInfo["gpu"]
+				}
+			} else if _, ok := v.FitInfo[string(v1.ResourceMemory)]; ok {
+				onlyMemFitRequestWithGpu[0]++
+				if v.NotFitInfo[string(v1.ResourceCPU)] >= onlyMemFitRequestWithGpu[1] && v.NotFitInfo["gpu"] >= onlyMemFitRequestWithGpu[2] {
+					onlyMemFitRequestWithGpu[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					onlyMemFitRequestWithGpu[2] = v.NotFitInfo["gpu"]
+				}
+			} else if _, ok := v.FitInfo["gpu"]; ok {
+				onlyGpuFitRequestWithGpu[0]++
+				if v.NotFitInfo[string(v1.ResourceCPU)] >= onlyGpuFitRequestWithGpu[1] && v.NotFitInfo[string(v1.ResourceMemory)] >= onlyGpuFitRequestWithGpu[2] {
+					onlyGpuFitRequestWithGpu[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					onlyGpuFitRequestWithGpu[2] = v.NotFitInfo[string(v1.ResourceMemory)]
+				}
+			}
+		} else if len(v.NotFitInfo) == 1 {
+			if resourceTypeCount == 3 {
+				if _, ok := v.NotFitInfo[string(v1.ResourceCPU)]; ok {
+					memGpuFit[0]++
+					if v.NotFitInfo[string(v1.ResourceCPU)] > memGpuFit[1] {
+						memGpuFit[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					}
+				} else if _, ok := v.NotFitInfo[string(v1.ResourceMemory)]; ok {
+					cpuGpuFit[0]++
+					if v.NotFitInfo[string(v1.ResourceMemory)] > cpuGpuFit[1] {
+						cpuGpuFit[1] = v.NotFitInfo[string(v1.ResourceMemory)]
+					}
+				} else if _, ok := v.NotFitInfo["gpu"]; ok {
+					cpuMemFit[0]++
+					if v.NotFitInfo["gpu"] > cpuMemFit[1] {
+						cpuMemFit[1] = v.NotFitInfo["gpu"]
+					}
+				}
+			} else if resourceTypeCount == 2 {
+				if _, ok := v.FitInfo[string(v1.ResourceCPU)]; ok {
+					onlyCpuFitRequestWithoutGpu[0]++
+					if v.NotFitInfo[string(v1.ResourceMemory)] > onlyCpuFitRequestWithoutGpu[1] {
+						onlyCpuFitRequestWithoutGpu[1] = v.NotFitInfo[string(v1.ResourceMemory)]
+					}
+				} else if _, ok := v.FitInfo[string(v1.ResourceMemory)]; ok {
+					onlyMemFitRequestWithoutGpu[0]++
+					if v.NotFitInfo[string(v1.ResourceCPU)] > onlyMemFitRequestWithoutGpu[1] {
+						onlyMemFitRequestWithoutGpu[1] = v.NotFitInfo[string(v1.ResourceCPU)]
+					}
+				}
+			}
+		}
+	}
+	klog.V(5).Infof("resource fit info: %v, %v, %v, %v, %v, %v, %v, %v", cpuMemFit, cpuGpuFit, memGpuFit, onlyCpuFitRequestWithGpu,
+		onlyMemFitRequestWithGpu, onlyGpuFitRequestWithGpu, onlyCpuFitRequestWithoutGpu, onlyMemFitRequestWithoutGpu)
+	errMsg := ""
+	if resourceTypeCount == 3 {
+		if allNotFit != 0 {
+			errMsg += fmt.Sprintf("GpuCpuMemAllNotFitNodes:%d. ", allNotFit)
+		}
+		if cpuGpuFit[0] != 0 {
+			errMsg += fmt.Sprintf("GpuCpuFitNodes:%d,maxMemFree:%dG. ", cpuGpuFit[0], cpuGpuFit[1]/1024/1024/1024)
+		}
+
+		if memGpuFit[0] != 0 {
+			errMsg += fmt.Sprintf("GpuMemFitNodes:%d,maxCpuFree:%d. ", memGpuFit[0], memGpuFit[1]/1000)
+		}
+
+		if cpuMemFit[0] != 0 {
+			errMsg += fmt.Sprintf("CpuMemFitNodes:%d,maxGpuFree:%d. ", cpuMemFit[0], cpuMemFit[1])
+		}
+
+		if onlyCpuFitRequestWithGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyCpuFitNodes:%d,maxGpuMemFree:%d/%dG. ", onlyCpuFitRequestWithGpu[0],
+				onlyCpuFitRequestWithGpu[2], onlyCpuFitRequestWithGpu[1]/1024/1024/1024)
+		}
+
+		if onlyMemFitRequestWithGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyMemFitNodes:%d,maxGpuCpuFree:%d/%d. ", onlyMemFitRequestWithGpu[0],
+				onlyMemFitRequestWithGpu[2], onlyMemFitRequestWithGpu[1]/1000)
+		}
+		if onlyGpuFitRequestWithGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyGpuFitNodes:%d,maxCpuMemFree:%d/%dG. ", onlyGpuFitRequestWithGpu[0],
+				onlyGpuFitRequestWithGpu[1]/1000, onlyGpuFitRequestWithGpu[2]/1024/1024/1024)
+		}
+
+	} else if resourceTypeCount == 2 {
+		if allNotFit != 0 {
+			errMsg += fmt.Sprintf("CpuMemNotFitNodes:%d. ", allNotFit)
+		}
+		if onlyCpuFitRequestWithoutGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyCpuFitNodes:%d,maxMemFree:%dG. ", onlyCpuFitRequestWithoutGpu[0], onlyCpuFitRequestWithoutGpu[1]/1024/1024/1024)
+		}
+		if onlyMemFitRequestWithoutGpu[0] != 0 {
+			errMsg += fmt.Sprintf("onlyMemFitNodes:%d,maxCpuFree:%d. ", onlyMemFitRequestWithoutGpu[0], onlyMemFitRequestWithoutGpu[1]/1000)
+		}
+	}
+	return errMsg
 }
 
 func newAffinityTerm(pod *v1.Pod, term *v1.PodAffinityTerm) (*AffinityTerm, error) {

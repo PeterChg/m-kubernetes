@@ -19,6 +19,7 @@ package noderesources
 import (
 	"context"
 	"fmt"
+	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -27,10 +28,10 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
-	v1helper "k8s.io/kubernetes/pkg/apis/core/v1/helper"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
+	"k8s.io/kubernetes/pkg/scheduler/util"
 )
 
 var _ framework.PreFilterPlugin = &Fit{}
@@ -219,39 +220,82 @@ func (f *Fit) Filter(ctx context.Context, cycleState *framework.CycleState, pod 
 		for _, r := range insufficientResources {
 			failureReasons = append(failureReasons, r.Reason)
 		}
-		return framework.NewStatus(framework.Unschedulable, failureReasons...)
+		status := framework.NewStatus(framework.Unschedulable, failureReasons...)
+		status.SetResourceInsufficientInfo(insufficientResources)
+		return status
 	}
 	return nil
 }
 
-// InsufficientResource describes what kind of resource limit is hit and caused the pod to not fit the node.
-type InsufficientResource struct {
-	ResourceName v1.ResourceName
-	// We explicitly have a parameter for reason to avoid formatting a message on the fly
-	// for common resources, which is expensive for cluster autoscaler simulations.
-	Reason    string
-	Requested int64
-	Used      int64
-	Capacity  int64
-}
+//// InsufficientResource describes what kind of resource limit is hit and caused the pod to not fit the node.
+//type InsufficientResource struct {
+//	ResourceName v1.ResourceName
+//	// We explicitly have a parameter for reason to avoid formatting a message on the fly
+//	// for common resources, which is expensive for cluster autoscaler simulations.
+//	Reason    string
+//	Requested int64
+//	Used      int64
+//	Capacity  int64
+//	GpuType   string
+//}
+//
+//func NewInsufficientResourceError(resourceName v1.ResourceName, reason string, requested, used, capacity int64, gpuType string) *InsufficientResource {
+//	return &InsufficientResource{
+//		ResourceName: resourceName,
+//		Reason:       reason,
+//		Requested:    requested,
+//		Used:         used,
+//		Capacity:     capacity,
+//		GpuType:      gpuType,
+//	}
+//}
+//
+//func (e *InsufficientResource) Error() string {
+//	return fmt.Sprintf("Node didn't have enough resource: %s, requested: %d, used: %d, capacity: %d",
+//		e.ResourceName, e.Requested, e.Used, e.Capacity)
+//}
+//
+//// GetReason returns the reason of the InsufficientResourceError.
+//func (e *InsufficientResource) GetReason() string {
+//	return fmt.Sprintf("Insufficient %v", e.ResourceName)
+//}
+//
+//// GetInsufficientAmount returns the amount of the insufficient resource of the error.
+//func (e *InsufficientResource) GetInsufficientAmount() int64 {
+//	return e.Requested - (e.Capacity - e.Used)
+//}
+//
+//// GetFreeAmount returns the unoccupied of the insufficient resource
+//func (e *InsufficientResource) GetFreeAmount() int64 {
+//	return e.Capacity - e.Used
+//}
+//
+//func (e *InsufficientResource) SetGpuType(gpuType string) *InsufficientResource {
+//	if gpuType != "" {
+//		e.GpuType = gpuType
+//	}
+//	return e
+//}
 
 // Fits checks if node have enough resources to host the pod.
-func Fits(pod *v1.Pod, nodeInfo *framework.NodeInfo) []InsufficientResource {
+func Fits(pod *v1.Pod, nodeInfo *framework.NodeInfo) []*util.InsufficientResource {
 	return fitsRequest(computePodResourceRequest(pod), nodeInfo, nil, nil)
 }
 
-func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignoredExtendedResources, ignoredResourceGroups sets.String) []InsufficientResource {
-	insufficientResources := make([]InsufficientResource, 0, 4)
+func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignoredExtendedResources, ignoredResourceGroups sets.String) []*util.InsufficientResource {
+	insufficientResources := make([]*util.InsufficientResource, 0, 4)
+	var gpuType string
 
 	allowedPodNumber := nodeInfo.Allocatable.AllowedPodNumber
 	if len(nodeInfo.Pods)+1 > allowedPodNumber {
-		insufficientResources = append(insufficientResources, InsufficientResource{
+		insufficientResources = append(insufficientResources, util.NewInsufficientResourceError(
 			v1.ResourcePods,
 			"Too many pods",
 			1,
 			int64(len(nodeInfo.Pods)),
 			int64(allowedPodNumber),
-		})
+			gpuType,
+		))
 	}
 
 	if podRequest.MilliCPU == 0 &&
@@ -259,34 +303,6 @@ func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignor
 		podRequest.EphemeralStorage == 0 &&
 		len(podRequest.ScalarResources) == 0 {
 		return insufficientResources
-	}
-
-	if podRequest.MilliCPU > (nodeInfo.Allocatable.MilliCPU - nodeInfo.Requested.MilliCPU) {
-		insufficientResources = append(insufficientResources, InsufficientResource{
-			v1.ResourceCPU,
-			"Insufficient cpu",
-			podRequest.MilliCPU,
-			nodeInfo.Requested.MilliCPU,
-			nodeInfo.Allocatable.MilliCPU,
-		})
-	}
-	if podRequest.Memory > (nodeInfo.Allocatable.Memory - nodeInfo.Requested.Memory) {
-		insufficientResources = append(insufficientResources, InsufficientResource{
-			v1.ResourceMemory,
-			"Insufficient memory",
-			podRequest.Memory,
-			nodeInfo.Requested.Memory,
-			nodeInfo.Allocatable.Memory,
-		})
-	}
-	if podRequest.EphemeralStorage > (nodeInfo.Allocatable.EphemeralStorage - nodeInfo.Requested.EphemeralStorage) {
-		insufficientResources = append(insufficientResources, InsufficientResource{
-			v1.ResourceEphemeralStorage,
-			"Insufficient ephemeral-storage",
-			podRequest.EphemeralStorage,
-			nodeInfo.Requested.EphemeralStorage,
-			nodeInfo.Allocatable.EphemeralStorage,
-		})
 	}
 
 	for rName, rQuant := range podRequest.ScalarResources {
@@ -301,15 +317,52 @@ func fitsRequest(podRequest *preFilterState, nodeInfo *framework.NodeInfo, ignor
 				continue
 			}
 		}
+
+		if strings.HasPrefix(string(rName), "cloudml.vgpu/") || strings.HasPrefix(string(rName), "cloudml.gpu/") {
+			gpuType = string(rName)
+		}
+
 		if rQuant > (nodeInfo.Allocatable.ScalarResources[rName] - nodeInfo.Requested.ScalarResources[rName]) {
-			insufficientResources = append(insufficientResources, InsufficientResource{
+			insufficientResources = append(insufficientResources, util.NewInsufficientResourceError(
 				rName,
 				fmt.Sprintf("Insufficient %v", rName),
 				podRequest.ScalarResources[rName],
 				nodeInfo.Requested.ScalarResources[rName],
 				nodeInfo.Allocatable.ScalarResources[rName],
-			})
+				gpuType,
+			))
 		}
+	}
+
+	if podRequest.MilliCPU > (nodeInfo.Allocatable.MilliCPU - nodeInfo.Requested.MilliCPU) {
+		insufficientResources = append(insufficientResources, util.NewInsufficientResourceError(
+			v1.ResourceCPU,
+			"Insufficient cpu",
+			podRequest.MilliCPU,
+			nodeInfo.Requested.MilliCPU,
+			nodeInfo.Allocatable.MilliCPU,
+			gpuType,
+		))
+	}
+	if podRequest.Memory > (nodeInfo.Allocatable.Memory - nodeInfo.Requested.Memory) {
+		insufficientResources = append(insufficientResources, util.NewInsufficientResourceError(
+			v1.ResourceMemory,
+			"Insufficient memory",
+			podRequest.Memory,
+			nodeInfo.Requested.Memory,
+			nodeInfo.Allocatable.Memory,
+			gpuType,
+		))
+	}
+	if podRequest.EphemeralStorage > (nodeInfo.Allocatable.EphemeralStorage - nodeInfo.Requested.EphemeralStorage) {
+		insufficientResources = append(insufficientResources, util.NewInsufficientResourceError(
+			v1.ResourceEphemeralStorage,
+			"Insufficient ephemeral-storage",
+			podRequest.EphemeralStorage,
+			nodeInfo.Requested.EphemeralStorage,
+			nodeInfo.Allocatable.EphemeralStorage,
+			gpuType,
+		))
 	}
 
 	return insufficientResources

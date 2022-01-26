@@ -808,71 +808,134 @@ func TestGetPodPriority(t *testing.T) {
 	}
 }
 
-func fakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool, ) *v1.Pod {
+func fakeCronJobPod(now time.Time, relativeStartMinute int, relativeStopMinute int, knockoffStartTime bool, knockoffStopTime bool) *v1.Pod {
 	pod := &v1.Pod{}
 	pod.Annotations = make(map[string]string)
 
-	startTime := now.Add(-1 * time.Duration(relativeStartMinute * 60) * time.Second)
-	stopTime := now.Add(-1 * time.Duration(relativeStopMinute * 60) * time.Second)
+	startTime := now.Add(-1 * time.Duration(relativeStartMinute*60) * time.Second)
+	stopTime := now.Add(-1 * time.Duration(relativeStopMinute*60) * time.Second)
 
-	if !knockoffStartTime{
-		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *",startTime.Minute(), startTime.Hour())
+	if !knockoffStartTime {
+		pod.Annotations["cron_start"] = fmt.Sprintf("%d %d * * *", startTime.Minute(), startTime.Hour())
 	}
-	if !knockoffStopTime{
-		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *",stopTime.Minute(), stopTime.Hour())
+	if !knockoffStopTime {
+		pod.Annotations["cron_end"] = fmt.Sprintf("%d %d * * *", stopTime.Minute(), stopTime.Hour())
 	}
 	return pod
 }
+
+func fakeColocatedPod(colocated bool, namespace string) *v1.Pod {
+	pod := &v1.Pod{}
+	pod.Labels = make(map[string]string)
+
+	if colocated {
+		pod.Namespace = namespace
+	}
+
+	return pod
+}
+
+func fakeColocatedNode(colocated bool, namespace string) *v1.Node {
+	node := &v1.Node{}
+
+	node.Labels = make(map[string]string)
+	if colocated {
+		node.Labels["xiaomi/node-owner"] = namespace
+	}
+
+	return node
+}
+
 func TestIsCrobJobPodRunNotInConfigTimeSlot(t *testing.T) {
 	now := time.Now()
 
-
 	tests := []struct {
-		pod             *v1.Pod
-		expected        bool
+		pod      *v1.Pod
+		expected bool
 	}{
 		{
-			pod:             fakeCronJobPod(now, 125, 65, false, false ),
-			expected:        true,
+			pod:      fakeCronJobPod(now, 125, 65, false, false),
+			expected: true,
 		},
 		{
-			pod:             fakeCronJobPod(now, -61, -121,false, false),
-			expected:        true,
+			pod:      fakeCronJobPod(now, -61, -121, false, false),
+			expected: true,
 		},
 		{
-			pod:             fakeCronJobPod(now, 10, 0,false, false),
-			expected:        true,
+			pod:      fakeCronJobPod(now, 10, 0, false, false),
+			expected: true,
 		},
 		{
-			pod:             fakeCronJobPod(now, 0, -10,false, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 0, -10, false, false),
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 10, -50, false, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 10, -50, false, false),
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 1, 60,false, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 1, 60, false, false),
+			expected: false,
 		},
 		{
-			pod:             &v1.Pod{},
-			expected:        false,
+			pod:      &v1.Pod{},
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 125, 65,true, false),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 125, 65, true, false),
+			expected: false,
 		},
 		{
-			pod:             fakeCronJobPod(now, 125, -65,false, true),
-			expected:        false,
+			pod:      fakeCronJobPod(now, 125, -65, false, true),
+			expected: false,
 		},
 	}
 
 	for i, test := range tests {
-		isAvailable,_:= IsCrobJobPodRunNotInConfigTimeSlot(test.pod)
+		isAvailable, _ := IsCrobJobPodRunNotInConfigTimeSlot(test.pod)
 		if isAvailable != test.expected {
 			t.Errorf("[tc #%d] expected available pod: %t, got: %t", i, test.expected, isAvailable)
+		}
+	}
+}
+
+func TestIsColocatePod(t *testing.T) {
+	tests := []struct {
+		pod      *v1.Pod
+		node     *v1.Node
+		expected bool
+	}{
+		{
+			pod:      fakeColocatedPod(true, "1111"),
+			node:     fakeColocatedNode(true, ""),
+			expected: false,
+		},
+		{
+			pod:      fakeColocatedPod(true, "1111"),
+			node:     fakeColocatedNode(true, "2222"),
+			expected: false,
+		},
+		{
+			pod:      fakeColocatedPod(true, ""),
+			node:     fakeColocatedNode(true, "1111"),
+			expected: false,
+		},
+		{
+			pod:      fakeColocatedPod(true, "1111"),
+			node:     fakeColocatedNode(true, "1111"),
+			expected: true,
+		},
+		{
+			pod:      fakeColocatedPod(true, ""),
+			node:     fakeColocatedNode(true, ""),
+			expected: true,
+		},
+	}
+
+	for i, test := range tests {
+		isAvailable := IsColocatePod(test.pod, test.node)
+		if isAvailable != test.expected {
+			t.Errorf("[tc #%d] expected colocated pod: %t, got: %t", i, test.expected, isAvailable)
 		}
 	}
 }

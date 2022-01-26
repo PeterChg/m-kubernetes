@@ -224,7 +224,7 @@ func (f *FitError) detailInsufficientResourceErrorMsg() string {
 			}
 		}
 	}
-	klog.V(5).Infof("resource fit info: %v, %v, %v, %v, %v, %v, %v, %v",  cpuMemFit, cpuGpuFit, memGpuFit, onlyCpuFitRequestWithGpu,
+	klog.V(5).Infof("resource fit info: %v, %v, %v, %v, %v, %v, %v, %v", cpuMemFit, cpuGpuFit, memGpuFit, onlyCpuFitRequestWithGpu,
 		onlyMemFitRequestWithGpu, onlyGpuFitRequestWithGpu, onlyCpuFitRequestWithoutGpu, onlyMemFitRequestWithoutGpu)
 	errMsg := ""
 	if resourceTypeCount == 3 {
@@ -601,6 +601,11 @@ func (g *genericScheduler) getLowerPriorityNominatedPods(pod *v1.Pod, nodeName s
 	var lowerPriorityPods []*v1.Pod
 	podPriority := podutil.GetPodPriority(pod)
 	isTimeOutCronJobPod, _ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+	isColocatePod := false
+
+	if nodeInfo, ok := g.nodeInfoSnapshot.NodeInfoMap[nodeName]; ok {
+		isColocatePod = podutil.IsColocatePod(pod, nodeInfo.Node())
+	}
 
 	for _, p := range pods {
 		pass, err := podutil.IsCrobJobPodRunNotInConfigTimeSlot(p)
@@ -608,7 +613,8 @@ func (g *genericScheduler) getLowerPriorityNominatedPods(pod *v1.Pod, nodeName s
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
 		}
 
-		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority) {
+		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority) ||
+			(isColocatePod && podutil.GetPodPriority(p) == podPriority && p.Namespace != pod.Namespace) {
 			lowerPriorityPods = append(lowerPriorityPods, p)
 		}
 	}
@@ -1311,6 +1317,7 @@ func (g *genericScheduler) selectVictimsOnNode(
 	// check if the given pod can be scheduled.
 	podPriority := podutil.GetPodPriority(pod)
 	isTimeOutCronJobPod, _ := podutil.IsCrobJobPodRunNotInConfigTimeSlot(pod)
+	isColocatePod := podutil.IsColocatePod(pod, nodeInfo.Node())
 
 	for _, p := range nodeInfo.Pods() {
 		if enableNonPreempting && p.Spec.PreemptionPolicy != nil && (*p.Spec.PreemptionPolicy == v1.NonPreemptible || *p.Spec.PreemptionPolicy == v1.NonPreemptiblePreemptNever) {
@@ -1323,7 +1330,8 @@ func (g *genericScheduler) selectVictimsOnNode(
 			klog.V(5).Infof("Pod %v/%v check config time slot failed:%s.", p.Namespace, p.Name, err.Error())
 		}
 
-		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority) {
+		if podutil.GetPodPriority(p) < podPriority || (!isTimeOutCronJobPod && pass && podutil.GetPodPriority(p) == podPriority) ||
+			(isColocatePod && podutil.GetPodPriority(p) == podPriority && p.Namespace != pod.Namespace) {
 			potentialVictims = append(potentialVictims, p)
 			if err := removePod(p); err != nil {
 				return nil, 0, false
@@ -1431,6 +1439,13 @@ func podEligibleToPreemptOthers(pod *v1.Pod, nodeNameToInfo map[string]*schedule
 								// There is a terminating cron job pod on the nominated node.
 								return false
 							}
+						}
+					}
+
+					if fit := podutil.IsColocatePod(p, nodeInfo.Node()); fit {
+						if podutil.GetPodPriority(p) == podPriority {
+							// There is a terminating pod preempted by colocated pod in the nominated node.
+							return false
 						}
 					}
 

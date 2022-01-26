@@ -20,12 +20,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/robfig/cron"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/kubernetes/pkg/features"
-	"github.com/robfig/cron"
 )
 
 // FindPort locates the container port for the given pod and portName.  If the
@@ -336,13 +336,13 @@ func GetPodPriority(pod *v1.Pod) int32 {
 	return 0
 }
 
-func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
+func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error) {
 	var cronStandardNextStartTime, cronStandardNextStopTime time.Time
 	var timeNow = time.Now()
 
 	if cronStartTime, ok := pod.Annotations["cron_start"]; !ok {
 		return false, nil
-	}else {
+	} else {
 		st, err := cron.ParseStandard(cronStartTime)
 		if err != nil {
 			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStartTime, err)
@@ -352,7 +352,7 @@ func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
 
 	if cronStopTime, ok := pod.Annotations["cron_end"]; !ok {
 		return false, nil
-	}else {
+	} else {
 		st, err := cron.ParseStandard(cronStopTime)
 		if err != nil {
 			return false, fmt.Errorf("unparseable schedule: %s : %s", cronStopTime, err)
@@ -361,4 +361,15 @@ func IsCrobJobPodRunNotInConfigTimeSlot(pod *v1.Pod) (bool, error){
 	}
 
 	return cronStandardNextStartTime.Before(cronStandardNextStopTime), nil
+}
+
+func IsColocatePod(pod *v1.Pod, node *v1.Node) bool {
+	nOwner := ""
+	fit := false
+
+	if nOwner, fit = node.Labels["xiaomi/node-owner"]; !fit {
+		return false
+	}
+
+	return pod.Namespace == nOwner
 }

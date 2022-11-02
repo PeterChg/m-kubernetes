@@ -19,6 +19,7 @@ package nodeaffinity
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -98,6 +99,11 @@ func (pl *NodeAffinity) Filter(ctx context.Context, state *framework.CycleState,
 		// Fallback to calculate requiredNodeSelector and requiredNodeAffinity
 		// here when PreFilter is disabled.
 		s = &preFilterState{requiredNodeSelectorAndAffinity: nodeaffinity.GetRequiredNodeAffinity(pod)}
+	}
+
+	//ECI vnode skip required node Affinity check, by default
+	if isECIVnode(node) {
+		return nil
 	}
 
 	// Ignore parsing errors for backwards compatibility.
@@ -251,4 +257,12 @@ func getPreFilterState(cycleState *framework.CycleState) (*preFilterState, error
 		return nil, fmt.Errorf("invalid PreFilter state, got type %T", c)
 	}
 	return s, nil
+}
+
+// check current node whether ECI vnode
+func isECIVnode(node *v1.Node) bool {
+	if value, exist := node.Labels["k8s.aliyun.com/vnode"]; exist {
+		return strings.Compare("true", value) == 0
+	}
+	return false
 }

@@ -345,13 +345,15 @@ func dryRunPreemption(ctx context.Context, fh framework.Handle,
 	nonViolatingCandidates := newCandidateList(numCandidates)
 	violatingCandidates := newCandidateList(numCandidates)
 	parallelCtx, cancel := context.WithCancel(ctx)
+	// refer to https://github.com/kubernetes/kubernetes/pull/111773
+	defer cancel()
 	nodeStatuses := make(framework.NodeToStatusMap)
 	var statusesLock sync.Mutex
 	checkNode := func(i int) {
 		nodeInfoCopy := potentialNodes[(int(offset)+i)%len(potentialNodes)].Clone()
 		stateCopy := state.Clone()
 		pods, numPDBViolations, status := selectVictimsOnNode(ctx, fh, stateCopy, pod, nodeInfoCopy, pdbs)
-		if status.IsSuccess() {
+		if status.IsSuccess() && len(pods) != 0 {
 			victims := extenderv1.Victims{
 				Pods:             pods,
 				NumPDBViolations: int64(numPDBViolations),
@@ -369,11 +371,14 @@ func dryRunPreemption(ctx context.Context, fh framework.Handle,
 			if nvcSize > 0 && nvcSize+vcSize >= numCandidates {
 				cancel()
 			}
-		} else {
-			statusesLock.Lock()
-			nodeStatuses[nodeInfoCopy.Node().Name] = status
-			statusesLock.Unlock()
+			return
 		}
+		if status.IsSuccess() && len(pods) == 0 {
+			status = framework.AsStatus(fmt.Errorf("expected at least one victim pod on node %q", nodeInfoCopy.Node().Name))
+		}
+		statusesLock.Lock()
+		nodeStatuses[nodeInfoCopy.Node().Name] = status
+		statusesLock.Unlock()
 	}
 	fh.Parallelizer().Until(parallelCtx, len(potentialNodes), checkNode)
 	return append(nonViolatingCandidates.get(), violatingCandidates.get()...), nodeStatuses
@@ -408,6 +413,18 @@ func CallExtenders(extenders []framework.Extender, pod *v1.Pod, nodeLister frame
 			}
 			return nil, framework.AsStatus(err)
 		}
+		// Check if the returned victims are valid.
+		for nodeName, victims := range nodeNameToVictims {
+			if victims == nil || len(victims.Pods) == 0 {
+				if extender.IsIgnorable() {
+					delete(nodeNameToVictims, nodeName)
+					klog.InfoS("Ignoring node without victims", "node", nodeName)
+					continue
+				}
+				return nil, framework.AsStatus(fmt.Errorf("expected at least one victim pod on node %q", nodeName))
+			}
+		}
+
 		// Replace victimsMap with new result after preemption. So the
 		// rest of extenders can continue use it as parameter.
 		victimsMap = nodeNameToVictims
